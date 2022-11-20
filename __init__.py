@@ -1,0 +1,1 @@
+from epic_wallet_rust_python import epic_wallet_rust_python as rust_lib
