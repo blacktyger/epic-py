@@ -1,98 +1,15 @@
-import platform
-
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives import serialization
 from hashlib import pbkdf2_hmac
 import mnemonic
-import requests
-import psutil
 
 from typing import Union
-import subprocess
 import binascii
 import time
 import json
 import os
 
-from epicpy.models import EpicBox, WalletConfig
-
-if 'windows' in platform.system().lower():
-    from epicpy import rust_lib
-else:
-    SystemExit(f"Current version supports only Windows 64bit platforms.")
-
-
-class CLIHandler:
-    """
-    Epic-Cash cli-wallet handler with bindings for RUST library.
-    """
-    def __init__(self,
-                 wallet_dir: str,
-                 password: str | None,
-                 *args, **kwargs):
-        self.owner_api_process = psutil.Process
-        self.wallet_lib = rust_lib,
-        self.password = password
-        self.epicbox: EpicBox
-        self.config: WalletConfig | None
-
-        self._load_config(wallet_dir)
-        self._load_epicbox()
-
-    def _load_config(self, wallet_dir: str):
-        """load wallet config from *.toml file"""
-        self.config = WalletConfig(wallet_dir)
-
-    def _load_epicbox(self):
-        """Initialize epicbox server connection"""
-        self.epicbox = EpicBox()
-        address = rust_lib.get_epicbox_address_py(
-            config=self.config.as_json(), password=self.password,
-            domain=self.epicbox.domain, port=self.epicbox.port
-            ).split('//')[-1].split('@')[0]
-        self.epicbox.address = address
-        self.epicbox.get_full_address()
-
-        try:
-            r = requests.get(f"https://{self.epicbox.domain}")
-            if r.status_code in [200, 2001]:
-                print(f">> Connected to epic-box server")
-            else:
-                print(f">>ERROR: failed connection to epic-box server \n {r.content}")
-        except Exception as e:
-            print(f">>ERROR: epicbox loading fail: {e}")
-
-    def run_owner_api(self):
-        if self.owner_api_process:
-            print(f"owner_api already running! {self.owner_api_process.pid}")
-            return
-        if not self.config:
-            print(f"no wallet config provided")
-            return
-
-        cwd = os.getcwd()
-        os.chdir(self.config.wallet_dir)
-        try:
-            print(f"running {self.config.wallet_dir}")
-            args = ['./epic-wallet', '-p', self.password, 'owner_api']
-            self.owner_api_process = subprocess.Popen(f"{' '.join(args)}")
-            print(f">> owner_api running [{self.owner_api_process.pid}]!")
-        except Exception as e:
-            print(f">> owner_api error, {e}")
-            self.stop_owner_api()
-
-        os.chdir(cwd)
-        time.sleep(0.5)
-
-    def stop_owner_api(self):
-        if self.owner_api_process:
-            self.owner_api_process.kill()
-            self._encryption_key = self._token = self.owner_api_process = None
-            print(f">> owner_api closed, encryption_key deleted")
-            return
-
-        print(f">> owner_api wasn't working ")
 
 class KeyManager:
     """
@@ -136,11 +53,12 @@ class KeyManager:
                 print(f'Successful wallet initialization from encrypted seed!')
 
         else:
-            if password:
-                if self.new(password=password):
-                    print(f'Successful new wallet initialization!')
-
-        self._info()
+            pass
+        #     if password:
+        #         if self.new(password=password):
+        #             print(f'Successful new wallet initialization!')
+        #
+        # self._info()
 
     @staticmethod
     def _valid_mnemonics(mnemonics):

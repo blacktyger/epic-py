@@ -7,35 +7,29 @@ from coincurve import PublicKey, PrivateKey
 from Crypto.Cipher import AES
 import requests
 
-from . import utils
+from epicpy import utils
 
 
 class HTTPHandler:
-    def __init__(self,
-                 auth_user: str,
-                 auth_password: str,
-                 owner_api: str,
-                 foreign_api: str,
-                 password: str):
+    auth_user = 'epic'
+    owner_api_version = 'v3'
+    foreign_api_version = 'v2'
 
-        self.auth = (auth_user, auth_password)
-        self.password = password
-        self.owner_api = owner_api
-        self.foreign_api = foreign_api
+    def __init__(self,
+                 api_secret_path: str,
+                 api_interface: str,
+                 foreign_port: str,
+                 owner_port: str,
+                 password: str):
 
         self._encryption_key: str = ''
         self._secret: PrivateKey = PrivateKey(os.urandom(32))
         self._token: str = ''
 
-        #
-        # connector = {
-        #     "foreign_api": f"{api_address}:{foreign_port}/{self.foreign_api_version}/foreign",
-        #     "owner_api": f"{api_address}:{owner_port}/{self.owner_api_version}/owner",
-        #     "auth_user": self.auth_user,
-        #     'password': self.password,
-        #     "auth_password": self.parse_secret(secret),
-        #     }
-        #
+        self.foreign_api = f"{api_interface}:{foreign_port}/{self.foreign_api_version}/foreign",
+        self.owner_api = f"{api_interface}:{owner_port}/{self.owner_api_version}/owner",
+        self.password = password,
+        self.auth = (self.auth_user, self.parse_secret(api_secret_path))
 
     def _secure_api_call(self, method: str, params: dict) -> dict:
         """Execute secure owner_api call, payload is encrypted
@@ -109,6 +103,39 @@ class HTTPHandler:
             'password': password,
             }
         self._token = self._secure_api_call('open_wallet', params)
+
+    def _send_via_http(self, amount: Union[float, int], address: str, **kwargs):
+        # Prepare transaction slate with partial data
+        print('>> preparing transaction (init_send_tx)')
+        transaction = self._prepare_slate(amount, **kwargs)
+        tx = self.init_send_tx(transaction)
+
+        address = f'{address}/{self.foreign_api_version}/foreign'
+        # Lock sender's outputs for transaction
+        print('>> locking funds (lock_outputs)')
+        self.tx_lock_outputs(tx)
+
+        try:
+            # Connect to receiver's foreign api wallet and send transaction slate
+            print('>> sending slate to receiver (receive_tx)')
+            response_tx = self.send_to_receiver_via_http(address, tx)
+
+            # Validate receiver's transaction response slate
+            print('>> validate receiver response (finalize)')
+            finalize = self.finalize_tx(response_tx)
+
+            # Send transaction to network using connected node
+            print('>> sending tx to network (post_tx)')
+            post_tx = self.post_tx(finalize['tx'])
+
+            if post_tx:
+                print(f'>> transaction sent successfully')
+                return finalize
+
+        except Exception as e:
+            print(e)
+            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=tx['id']))
+            return
 
     def node_height(self):
         """Get block height from connected node"""
@@ -437,6 +464,20 @@ class HTTPHandler:
 
         response = self._api_call(method, params, api='foreign')
         return utils.parse_api_response(response)
+
+    @staticmethod
+    def parse_secret(secret: str) -> str:
+        """
+        Parse secret, input can be path to file or secret itself
+        :param secret: string, path or secret
+        :return: string, secret
+        """
+        if os.path.isfile(secret):
+            with open(secret, 'r') as f:
+                wallet_secret = f.read()
+            return wallet_secret
+        else:
+            return secret
 
     def _encrypt(self, payload) -> dict:
         """

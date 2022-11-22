@@ -8,16 +8,19 @@ from epicpy import utils
 
 
 class WalletConfig(utils.TOMLConfig):
-    def __init__(self, wallet_dir: str, **kwargs):
+    def __init__(self, wallet_dir: str, password: str, **kwargs):
         self.config_file = os.path.join(wallet_dir, 'epic-wallet.toml')
-        super().__init__(self.config_file)
+
+        if os.path.isfile(self.config_file):
+            super().__init__(self.config_file)
 
         self.tor = self.settings['tor']
         self.wallet = self.settings['wallet']
         self.logging = self.settings['logging']
+        self.password = password
+        self.wallet_dir = wallet_dir
         self.account: str = 'default'
         self.account_id: int = 0
-        self.wallet_dir = wallet_dir
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -36,7 +39,7 @@ class WalletConfig(utils.TOMLConfig):
         return f"WalletConfig(path='{self.config_file}')"
 
 
-class EpicBox(BaseModel):
+class EpicBoxConfig(BaseModel):
     prefix: str | None = Field('epicbox')
     domain: str | None = Field(default='epicpost.stackwallet.com')
     port: str | None = Field(default=0)
@@ -51,6 +54,9 @@ class EpicBox(BaseModel):
         result = f"{self.prefix}://{self.address}@{self.domain}"
         if self.port: result += f"{result}:{self.port}"
         self.full_address = result
+
+    def get_short_address(self):
+        return f"{self.address[0:3]}...{self.address[-3:]}"
 
     def as_json(self):
         return self.json(include={'domain', 'port'})

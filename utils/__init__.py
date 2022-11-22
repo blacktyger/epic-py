@@ -1,5 +1,7 @@
+import time
 from typing import Union
 import subprocess
+import platform
 import os
 import re
 
@@ -11,6 +13,55 @@ from .toml import TOMLConfig
 
 
 logger = get_logger()
+
+
+def find_process_by_port(port: int):
+    if 'windows' in platform.system().lower():
+        cmd = f'''for /f "tokens=5" %a in ('netstat -aon ^| findstr {port}') do @echo %~nxa'''
+        return subprocess.getoutput(cmd)
+    else:
+        return 0
+
+
+def get_tx_slate_id(slate: str) -> str | None:
+    """Extract tx_slate_id UUID from various types of data"""
+    pattern = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    dashes = True
+
+    if not slate:
+        return None
+
+    if isinstance(slate, list):
+        slate = slate[0]
+
+    if isinstance(slate, dict):
+        print(slate)
+        for k, v in slate.items():
+            if re.findall(pattern, k):
+                return k
+
+    while dashes:
+        if '[null, null]' in slate:
+            return None
+
+        slate = slate.replace('\\', '')
+
+        if '\\' in slate:
+            continue
+        else:
+            dashes = False
+    try:
+        extract = slate.split('tx_slate_id')[1].\
+            split('":"')[1].\
+            split('"')[0]
+
+        match = re.findall(pattern, extract)
+
+        if match:
+            match = match[0]
+            return match
+    except:
+        return None
 
 
 def is_valid_url(url):
