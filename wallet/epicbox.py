@@ -10,17 +10,7 @@ from .. import utils
 from . import models
 
 if 'windows' in platform.system().lower():
-    from epic_wallet_rust_python import (
-        get_epicbox_address_py,
-        subscribe_request_py,
-        decrypt_slates_py,
-        process_slate_py,
-        post_request_py,
-        cancel_tx_py,
-        create_tx_py,
-        post_tx_py,
-        # get_txs_py
-        )
+    import epic_wallet_rust_python as r_lib
 else:
     SystemExit(f"Current version supports only Windows 64bit platforms.")
 
@@ -44,7 +34,7 @@ class EpicBoxHandler:
             self.box_cfg = models.EpicBoxConfig()
             address = self._parse_rust(
                 self._run(
-                    get_epicbox_address_py,
+                    r_lib.get_epicbox_address_py,
                     domain=self.box_cfg.domain,
                     port=self.box_cfg.port)
                 )
@@ -128,7 +118,7 @@ class EpicBoxHandler:
         """
         # print(slates)
         print(f">> Start decrypting {len(slates)} slates")
-        decrypted = self._parse_rust(self._run(decrypt_slates_py,
+        decrypted = self._parse_rust(self._run(r_lib.decrypt_slates_py,
                                      encrypted_slates=json.dumps(slates)))
         return [json.loads(slate) for slate in decrypted]
 
@@ -137,7 +127,7 @@ class EpicBoxHandler:
         Create a signature for epic-box requests
         :returns
         """
-        request = self._run(subscribe_request_py, epicbox_config=self.box_cfg.as_json())
+        request = self._run(r_lib.subscribe_request_py, epicbox_config=self.box_cfg.as_json())
         return json.loads(self._parse_rust(request))['signature']
 
     def create_tx_slate(self,
@@ -154,7 +144,7 @@ class EpicBoxHandler:
         """
         amount = int(amount * 10 ** 8)
         args = (amount, min_confirmations, use_all_outputs)
-        return self._parse_rust(self._run(create_tx_py, args=args))
+        return self._parse_rust(self._run(r_lib.create_tx_py, args=args))
 
     def cancel_tx_slate(self, slate: str = None, tx_slate_id: str = None) -> str | None:
         """
@@ -170,7 +160,7 @@ class EpicBoxHandler:
         if slate and not tx_slate_id:
             tx_slate_id = utils.get_tx_slate_id(slate)
 
-        return self._parse_rust(self._run(cancel_tx_py, tx_slate_id=tx_slate_id))
+        return self._parse_rust(self._run(r_lib.cancel_tx_py, tx_slate_id=tx_slate_id))
 
     def post_tx_slate(self, receiver_address: str, slate: str):
         """
@@ -184,7 +174,7 @@ class EpicBoxHandler:
 
         request_slate = self._parse_rust(
             self._run(
-                post_request_py,
+                r_lib.post_request_py,
                 epicbox_config=self.box_cfg.as_json(),
                 receiver_address=receiver_address,
                 slate=slate
@@ -227,7 +217,7 @@ class EpicBoxHandler:
                 slate = slate[0]
 
             # print('python >>', slate)
-            response = self._parse_rust(self._run(process_slate_py, slate=slate))
+            response = self._parse_rust(self._run(r_lib.process_slate_py, slate=slate))
             if response:
                 processed.append(response)
 
@@ -239,7 +229,7 @@ class EpicBoxHandler:
         :return:
         """
         tx_slate_id = utils.get_tx_slate_id(finalize_slate)
-        return self._parse_rust(self._run(post_tx_py, tx_slate_id=tx_slate_id))
+        return self._parse_rust(self._run(r_lib.post_tx_py, tx_slate_id=tx_slate_id))
 
     def post_cancel_tx_slate(self, receiving_address: str,
                              slate: str = None, tx_slate_id: str = None) -> list:
