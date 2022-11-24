@@ -24,31 +24,30 @@ class EpicBoxHandler:
         self.listener_thread = threading.Thread
         self.stop_listener = True
         self.wallet_config = wallet_config
-        self.box_api_url: str
-        self.box_cfg: models.EpicBoxConfig
+        self.epicbox: models.EpicBoxConfig
         self._load_cfg()
 
     def _load_cfg(self):
         """Initialize epicbox settings and check server connection"""
         try:
-            self.box_cfg = models.EpicBoxConfig()
+            self.epicbox = models.EpicBoxConfig()
             address = self._parse_rust(
                 self._run(
                     r_lib.get_epicbox_address_py,
-                    domain=self.box_cfg.domain,
-                    port=self.box_cfg.port)
+                    domain=self.epicbox.domain,
+                    port=self.epicbox.port)
                 )
             address = address.split('//')[-1].split('@')[0]
-            self.box_cfg.address = address
-            self.box_cfg.get_full_address()
-            self.box_api_url = f"https://{self.box_cfg.domain}"
+            self.epicbox.address = address
+            self.epicbox.init_config()
+            print(self.epicbox)
 
         except Exception as e:
             print(f">> ERROR: loading epicbox config failed: {e}")
 
         # Check connection to the epic-box server
         try:
-            r = requests.get(self.box_api_url)
+            r = requests.get(self.epicbox.api_url)
             if r.status_code in [200, 2001]:
                 print(f">> Connected to epic-box server")
             else:
@@ -127,7 +126,7 @@ class EpicBoxHandler:
         Create a signature for epic-box requests
         :returns
         """
-        request = self._run(r_lib.subscribe_request_py, epicbox_config=self.box_cfg.as_json())
+        request = self._run(r_lib.subscribe_request_py, epicbox_config=self.epicbox.as_json())
         return json.loads(self._parse_rust(request))['signature']
 
     def create_tx_slate(self,
@@ -148,7 +147,7 @@ class EpicBoxHandler:
 
     def cancel_tx_slate(self, slate: str = None, tx_slate_id: str = None) -> str | None:
         """
-        Initialize transaction as sender, create new slate
+        Cancel transaction
         :param tx_slate_id:
         :param slate:
         :return:
@@ -175,12 +174,12 @@ class EpicBoxHandler:
         request_slate = self._parse_rust(
             self._run(
                 r_lib.post_request_py,
-                epicbox_config=self.box_cfg.as_json(),
+                epicbox_config=self.epicbox.as_json(),
                 receiver_address=receiver_address,
                 slate=slate
                 ))
 
-        url = f"{self.box_api_url}/postSlate"
+        url = f"{self.epicbox.api_url}/postSlate"
         payload = {'receivingAddress': receiver_address, 'slate': request_slate}
         return self._parse_epicbox(requests.post(url=url, json=payload))
 
@@ -188,8 +187,8 @@ class EpicBoxHandler:
         """
         :return:
         """
-        url = f"{self.box_api_url}/getSlates"
-        payload = {'receivingAddress': self.box_cfg.address,
+        url = f"{self.epicbox.api_url}/getSlates"
+        payload = {'receivingAddress': self.epicbox.address,
                    'signature': self._get_signature()}
         encrypted_slates = self._parse_epicbox(
             requests.post(url=url, json=payload))
@@ -231,9 +230,17 @@ class EpicBoxHandler:
         tx_slate_id = utils.get_tx_slate_id(finalize_slate)
         return self._parse_rust(self._run(r_lib.post_tx_py, tx_slate_id=tx_slate_id))
 
-    def post_cancel_tx_slate(self, receiving_address: str,
+    def get_transactions(self) -> list:
+        """
+        :return: list, local transaction history of the wallet instance
+        """
+        transactions = self._parse_rust(self._run(r_lib.get_txs_py))
+        return json.loads(transactions)
+
+    def post_cancel_transaction(self, receiving_address: str,
                              slate: str = None, tx_slate_id: str = None) -> list:
         """
+        Call to send cancel request to epic-box server (as sender)
         :param tx_slate_id:
         :param receiving_address:
         :param slate:
@@ -247,9 +254,9 @@ class EpicBoxHandler:
             tx_slate_id = utils.get_tx_slate_id(slate)
 
         print(f">> send cancel request to epicbox server")
-        url = f"{self.box_api_url}/postCancel"
+        url = f"{self.epicbox.api_url}/postCancel"
         payload = {'receivingAddress': receiving_address,
-                   'sendersAddress': self.box_cfg.address,
+                   'sendersAddress': self.epicbox.address,
                    'signature': self._get_signature(),
                    'slate': tx_slate_id}
         return self._parse_epicbox(requests.post(url=url, json=payload))
@@ -263,7 +270,7 @@ class EpicBoxHandler:
         if not isinstance(slate, str):
             slate = json.dumps(slate)
 
-        url = f"{self.box_api_url}/deleteSlate"
+        url = f"{self.epicbox.api_url}/deleteSlate"
         payload = {'receivingAddress': receiving_address,
                    'signature': self._get_signature(),
                    'slate': slate}
@@ -273,8 +280,8 @@ class EpicBoxHandler:
         """
         :return:
         """
-        url = f"{self.box_api_url}/getCancels"
-        payload = {'receivingAddress': self.box_cfg.address,
+        url = f"{self.epicbox.api_url}/getCancels"
+        payload = {'receivingAddress': self.epicbox.address,
                    'signature': self._get_signature()}
         return self._parse_epicbox(requests.post(url=url, json=payload))
 
@@ -293,7 +300,7 @@ class EpicBoxHandler:
         if slate and not tx_slate_id:
             tx_slate_id = utils.get_tx_slate_id(slate)
 
-        url = f"{self.box_api_url}/deleteCancels"
+        url = f"{self.epicbox.api_url}/deleteCancels"
         payload = {'receivingAddress': receiving_address,
                    'signature': self._get_signature(),
                    'slate': tx_slate_id}
@@ -301,14 +308,14 @@ class EpicBoxHandler:
 
     def run_listening(self):
         print(f">> Starting EPIC-BOX listener for "
-              f"{self.box_cfg.get_short_address()}")
+              f"{self.epicbox.get_short_address()}")
         self.stop_listener = False
         self.listener_thread = threading.Thread(target=self._listener)
         self.listener_thread.start()
 
     def stop_listening(self):
         print(f">> Stopping EPIC-BOX listener for "
-             f"{self.box_cfg.get_short_address()}")
+             f"{self.epicbox.get_short_address()}")
         self.stop_listener = True
 
     def _listener(self):

@@ -1,38 +1,27 @@
 import psutil
 
 import subprocess
-import platform
 import time
 import os
 
 from . import models
-from epicpy import utils
+from .. import utils
 
 
 class CLIHandler:
     """
     Epic-Cash cli-wallet handler with bindings for RUST library.
     """
-    def __init__(self, wallet_dir: str, password: str):
-        self.wallet_dir = wallet_dir
-        self.password = password
-
+    def __init__(self, config: models.WalletConfig):
         self.foreign_api_process: psutil.Process | None = None
         self.owner_api_process: psutil.Process | None = None
-        self.epicbox: models.EpicBoxConfig | None = None
-        self.config: models.WalletConfig | None = None
+        self.config = config
 
-        self._load_config()
-
-    def _load_config(self, wallet_dir: str = None):
-        """load wallet config from *.toml file"""
-        if not wallet_dir: wallet_dir = self.wallet_dir
-        self.config = models.WalletConfig(wallet_dir, self.password)
-
+    # TODO listener not working as expected (port stuff)
     def run_owner_api(self):
         owner_port = self.config.wallet['owner_api_listen_port']
         external_process_pid = utils.find_process_by_port(owner_port)
-
+        print(external_process_pid)
         if self.owner_api_process:
             print(f"owner_api already running! {self.owner_api_process.pid}")
             return
@@ -48,13 +37,14 @@ class CLIHandler:
         os.chdir(self.config.wallet_dir)
 
         try:
-            print(f"running owner_api {self.wallet_dir}")
-            args = ['./epic-wallet', '-p', self.password, 'owner_api']
+            print(f"running owner_api {self.config.wallet_dir}")
+            args = ['./epic-wallet', '-p', self.config.password, 'owner_api']
+            print(args)
             self.owner_api_process = subprocess.Popen(f"{' '.join(args)}")
             print(f">> owner_api running [{self.owner_api_process.pid}]!")
 
         except Exception as e:
-            if 'Only one usage of each socket address' in e:
+            if 'Only one usage of each socket address' in str(e):
                 print(f"owner_api already running!")
             else:
                 print(f">> owner_api error, {e}")
@@ -79,11 +69,11 @@ class CLIHandler:
             return
 
         cwd = os.getcwd()
-        os.chdir(self.wallet_dir)
+        os.chdir(self.config.wallet_dir)
 
         try:
-            print(f">> running foreign_api {self.wallet_dir}")
-            args = ['./epic-wallet', '-p', self.password, 'listen']
+            print(f">> running foreign_api {self.config.wallet_dir}")
+            args = ['./epic-wallet', '-p', self.config.password, 'listen']
             self.foreign_api_process = subprocess.Popen(f"{' '.join(args)}")
             time.sleep(0.3)
             print(f">> foreign_api running [{self.foreign_api_process.pid}]!")

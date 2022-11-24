@@ -18,7 +18,12 @@ logger = get_logger()
 def find_process_by_port(port: int):
     if 'windows' in platform.system().lower():
         cmd = f'''for /f "tokens=5" %a in ('netstat -aon ^| findstr {port}') do @echo %~nxa'''
-        return subprocess.getoutput(cmd)
+        result = subprocess.getoutput(cmd)
+
+        if '\n' in result:
+            result = result.split('\n')[0]
+
+        return result
     else:
         return 0
 

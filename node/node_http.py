@@ -2,8 +2,8 @@ from typing import Union
 
 import requests
 
-from . import utils
-from .utils import logger
+from .. import utils
+from ..utils import logger
 
 
 class HTTPHandler:

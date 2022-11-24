@@ -4,7 +4,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-from epicpy import utils
+from .. import utils
 
 
 class WalletConfig(utils.TOMLConfig):
@@ -45,18 +45,23 @@ class EpicBoxConfig(BaseModel):
     port: str | None = Field(default=0)
     address: str | None = Field(default='')
     full_address: str | None
+    api_url: str | None
 
     def __init__(self, **data: Any):
         super().__init__(**data)
-        self.get_full_address()
+        self.init_config()
 
-    def get_full_address(self):
-        result = f"{self.prefix}://{self.address}@{self.domain}"
-        if self.port: result += f"{result}:{self.port}"
-        self.full_address = result
+    def init_config(self):
+        _full_address = f"{self.prefix}://{self.address}@{self.domain}"
+
+        if self.port:
+            _full_address += f"{_full_address}:{self.port}"
+
+        self.full_address = _full_address
+        self.api_url = f"https://{self.domain}"
 
     def get_short_address(self):
-        return f"{self.address[0:3]}...{self.address[-3:]}"
+        return f"{self.address[0:4]}...{self.address[-4:]}"
 
     def as_json(self):
         return self.json(include={'domain', 'port'})

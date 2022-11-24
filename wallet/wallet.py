@@ -4,7 +4,7 @@ from .key_manager import KeyManager
 from .epicbox import EpicBoxHandler
 from .http import HTTPHandler
 from .cli import CLIHandler
-from epicpy import utils
+from .. import utils
 from . import models
 
 
@@ -16,25 +16,21 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
            look for `wallet_data` dir with `wallet.seed` file inside
     """
 
-    def __init__(self, wallet_dir: str, password: str, *args, **kwargs):
-        self.wallet_dir = wallet_dir
-        self.password = password
-        self.config: models.WalletConfig
+    def __init__(self, wallet_dir: str, password: str, **kwargs):
+        self.config = models.WalletConfig(wallet_dir, password, **kwargs)
 
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+        KeyManager.__init__(self, **kwargs)
 
-        CLIHandler.__init__(self, self.wallet_dir, self.password)
-        KeyManager.__init__(self, *args, **kwargs)
-        EpicBoxHandler.__init__(self, self.config)
-        HTTPHandler.__init__(self,
-            api_secret_path=self.config.wallet['api_secret_path'],
-            api_interface=self.config.wallet['api_listen_interface'],
-            foreign_port=self.config.wallet['api_listen_port'],
-            owner_port=self.config.wallet['owner_api_listen_port'],
-            password=self.password)
+        if self.config:
+            EpicBoxHandler.__init__(self, self.config)
+            HTTPHandler.__init__(self, self.config)
+            CLIHandler.__init__(self, self.config)
 
         print(f">> Epic-Cash wallet successfully initialized.")
+
+    def load_config(self, wallet_dir: str, password: str):
+        """load wallet config from *.toml file"""
+        self.config = models.WalletConfig(wallet_dir, password)
 
     def open(self, password: str = None):
         """
@@ -42,7 +38,7 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
         and generate token used for the further communication
         :param password: str, wallet password
         """
-        if not password: password = self.password
+        if not password: password = self.config.password
 
         self._init_secure_api()
         self._open_wallet(password)

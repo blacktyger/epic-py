@@ -1,3 +1,5 @@
+import time
+from http.client import RemoteDisconnected
 from typing import Union
 import base64
 import json
@@ -7,7 +9,8 @@ from coincurve import PublicKey, PrivateKey
 from Crypto.Cipher import AES
 import requests
 
-from epicpy import utils
+from .. import utils
+from . import models
 
 
 class HTTPHandler:
@@ -15,21 +18,18 @@ class HTTPHandler:
     owner_api_version = 'v3'
     foreign_api_version = 'v2'
 
-    def __init__(self,
-                 api_secret_path: str,
-                 api_interface: str,
-                 foreign_port: str,
-                 owner_port: str,
-                 password: str):
-
+    def __init__(self, config: models.WalletConfig):
+        self.config = config
         self._encryption_key: str = ''
         self._secret: PrivateKey = PrivateKey(os.urandom(32))
         self._token: str = ''
 
-        self.foreign_api = f"{api_interface}:{foreign_port}/{self.foreign_api_version}/foreign",
-        self.owner_api = f"{api_interface}:{owner_port}/{self.owner_api_version}/owner",
-        self.password = password,
-        self.auth = (self.auth_user, self.parse_secret(api_secret_path))
+        settings_ = self.config.wallet
+        self.foreign_api = f"http://{settings_['api_secret_path']}:{settings_['api_listen_port']}/" \
+                           f"{self.foreign_api_version}/foreign",
+        self.owner_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/" \
+                         f"{self.owner_api_version}/owner",
+        self.auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
 
     def _secure_api_call(self, method: str, params: dict) -> dict:
         """Execute secure owner_api call, payload is encrypted
@@ -70,7 +70,8 @@ class HTTPHandler:
         :return: None, save encryption key to instance variable
         """
         # Start owner_api in background, kill when closing wallet
-        self._run_owner_api()
+        self.run_owner_api()
+        time.sleep(2)
 
         # POST your secret.public_key and receive new api_public_key
         response = self._api_call(
@@ -295,7 +296,7 @@ class HTTPHandler:
             'name': name,
             }
         resp = self._secure_api_call('close_wallet', params)
-        self._stop_owner_api()
+        self.stop_owner_api()
         return True
 
     def create_account_path(self, label):
@@ -326,7 +327,7 @@ class HTTPHandler:
         return True
 
     def get_mnemonic(self, password: str = None, name: str = None):
-        if not password: password = self.password
+        if not password: password = self.config.password
 
         params = {
             'name': name,
@@ -370,7 +371,7 @@ class HTTPHandler:
             'dir': dir_path,
             }
         self._secure_api_call('set_top_level_directory', params)
-        self._stop_owner_api()
+        self.stop_owner_api()
         return True
 
     def set_tor_config(self, tor_config=None):
@@ -403,7 +404,7 @@ class HTTPHandler:
 
     def create_wallet(self, password: str = None, name: str = None,
                       mnemonic: str = None, mnemonic_length: int = 24):
-        if not password: password = self.password
+        if not password: password = self.config.password
 
         params = {
             'name': name,
@@ -523,12 +524,11 @@ class HTTPHandler:
             'params': params
             }
 
-        api_url = getattr(self, f"{api}_api")
+        api_url = getattr(self, f"{api}_api")[0]
 
         try:
             response = requests.post(api_url, json=payload, auth=self.auth)
             return utils.parse_api_response(response)
-        except requests.exceptions.ConnectionError:
-            self._stop_owner_api()
+        except (requests.exceptions.ConnectionError, RemoteDisconnected):
+            self.stop_owner_api()
             raise SystemExit(f'Connection error, is wallet owner_api running under: {api_url}?')
-

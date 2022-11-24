@@ -4,8 +4,8 @@ from typing import Union
 
 import psutil
 
-from .utils import logger
-from . import utils
+from ..utils import logger
+from .. import utils
 
 
 # Hide CMD windows while using subprocess

@@ -1,15 +1,15 @@
 import os
 
-from . import utils
-from .utils import logger
-from .utils.defaults import Node as defaults
+from ..utils.defaults import Node as defaults
 from .node_cli import CLIHandler
 from .node_http import HTTPHandler
+from ..utils import logger
+from .. import utils
 
 
-class Node(HTTPHandler, CLIHandler):
+class ServerNode(HTTPHandler, CLIHandler):
     """
-    Class representing Epic-Cash node instance with
+    Class representing Epic-Cash server/node instance with
     various helper functions and API calls
     """
     binary_name = defaults.binary_name
