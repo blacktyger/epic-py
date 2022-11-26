@@ -64,11 +64,15 @@ class EpicBoxHandler:
         response = json.loads(response)
 
         if response['error']:
-            print(f">> ERROR: '{response['message']}'")
+            if 'Wallet store error: DB Not Found Error' in response['message']:
+                print(f">> WARNING: Transaction already processed.")
+                return None
+            else:
+                print(f">> ERROR: '{response['message']}'")
             return None
 
         if 'success' not in response['message']:
-            print(f">>WARNING: '{response['message']}'")
+            print(f">> WARNING: '{response['message']}'")
 
         return response['result']
 
@@ -109,17 +113,6 @@ class EpicBoxHandler:
                         password=self.wallet_config.password, **kwargs)
         except Exception as e:
             print(f">> RUST ERROR: {e}")
-
-    def _decrypt_tx_slates(self, slates: list) -> list:
-        """
-        :param slates:
-        :return:
-        """
-        # print(slates)
-        print(f">> Start decrypting {len(slates)} slates")
-        decrypted = self._parse_rust(self._run(r_lib.decrypt_slates_py,
-                                     encrypted_slates=json.dumps(slates)))
-        return [json.loads(slate) for slate in decrypted]
 
     def _get_signature(self):
         """
@@ -193,9 +186,19 @@ class EpicBoxHandler:
         encrypted_slates = self._parse_epicbox(
             requests.post(url=url, json=payload))
 
-        return self._decrypt_tx_slates(encrypted_slates)
+        return encrypted_slates
 
-    def process_tx_slates(self, slates: list):
+    def decrypt_tx_slates(self, slates: list) -> list:
+        """
+        :param slates:
+        :return:
+        """
+        # print(slates)
+        decrypted = self._parse_rust(self._run(r_lib.decrypt_slates_py,
+                                     encrypted_slates=json.dumps(slates)))
+        return [json.loads(slate) for slate in decrypted]
+
+    def process_tx_slates(self, slates: list) -> list:
         """
         :param slates:
         :return:
@@ -212,6 +215,8 @@ class EpicBoxHandler:
                     slate = json.loads(slate[0])[1]
                 except KeyError:
                     slate = slate[1]
+            elif 'TxReceived' in slate[0]:
+                slate = json.dumps(slate)
             else:
                 slate = slate[0]
 
@@ -219,15 +224,23 @@ class EpicBoxHandler:
             response = self._parse_rust(self._run(r_lib.process_slate_py, slate=slate))
             if response:
                 processed.append(response)
+                print(self.post_delete_tx_slate(self.epicbox.address, slate))
 
-        return json.dumps(processed)
+        return processed
 
-    def post_transaction(self, finalize_slate: str):
+    def post_transaction(self, finalize_slate: str = None, tx_slate_id: str = None):
         """
+        :param tx_slate_id:
         :param finalize_slate:
         :return:
         """
-        tx_slate_id = utils.get_tx_slate_id(finalize_slate)
+        if not finalize_slate and not tx_slate_id:
+            print(f">> ERROR: slate or tx_slate_id is required")
+            return
+
+        if finalize_slate and not tx_slate_id:
+            tx_slate_id = utils.get_tx_slate_id(finalize_slate)
+
         return self._parse_rust(self._run(r_lib.post_tx_py, tx_slate_id=tx_slate_id))
 
     def get_transactions(self) -> list:

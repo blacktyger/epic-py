@@ -18,6 +18,8 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
 
     def __init__(self, wallet_dir: str, password: str, **kwargs):
         self.config = models.WalletConfig(wallet_dir, password, **kwargs)
+        self.state = None
+        self.is_locked = False
 
         KeyManager.__init__(self, **kwargs)
 
@@ -47,6 +49,13 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
             utils.logger.info('Wallet initialized with owner access.')
         else:
             utils.logger.warning('Failed to open wallet.')
+
+    def is_balance_enough(self, amount: float | str | int):
+        self.open()
+        spendable = self.retrieve_summary_info()['amount_currently_spendable']
+        self.close()
+        fee = 0.007
+        return float(spendable) > (float(amount) + fee)
 
     def send_transaction(self, method: str, amount: Union[float, int],
                          address: str, **kwargs):

@@ -17,18 +17,19 @@ class CLIHandler:
         self.owner_api_process: psutil.Process | None = None
         self.config = config
 
-    # TODO listener not working as expected (port stuff)
     def run_owner_api(self):
         owner_port = self.config.wallet['owner_api_listen_port']
         external_process_pid = utils.find_process_by_port(owner_port)
-        print(external_process_pid)
+
         if self.owner_api_process:
             print(f"owner_api already running! {self.owner_api_process.pid}")
             return
-        elif external_process_pid:
+
+        elif external_process_pid not in (None, 0, '0'):
             self.owner_api_process = psutil.Process(int(external_process_pid))
             print(f"owner_api already running! {self.owner_api_process.pid}")
             return
+
         elif not self.config:
             print(f"no wallet config provided")
             return
@@ -37,15 +38,14 @@ class CLIHandler:
         os.chdir(self.config.wallet_dir)
 
         try:
-            print(f"running owner_api {self.config.wallet_dir}")
+            print(f">> starting owner_api {self.config.wallet_dir}")
             args = ['./epic-wallet', '-p', self.config.password, 'owner_api']
-            print(args)
             self.owner_api_process = subprocess.Popen(f"{' '.join(args)}")
-            print(f">> owner_api running [{self.owner_api_process.pid}]!")
+            print(f">> owner_api is running [PID: {self.owner_api_process.pid}]!")
 
         except Exception as e:
             if 'Only one usage of each socket address' in str(e):
-                print(f"owner_api already running!")
+                print(f">> owner_api already running!")
             else:
                 print(f">> owner_api error, {e}")
                 self.stop_owner_api()
@@ -60,10 +60,12 @@ class CLIHandler:
         if self.foreign_api_process:
             print(f"foreign_api already running! {self.foreign_api_process.pid}")
             return
-        elif external_process_pid:
+
+        elif external_process_pid not in (None, 0, '0'):
             self.foreign_api_process = psutil.Process(int(external_process_pid))
             print(f"foreign_api already running! {self.foreign_api_process.pid}")
             return
+
         elif not self.config:
             print(f"no wallet config provided")
             return
@@ -75,8 +77,8 @@ class CLIHandler:
             print(f">> running foreign_api {self.config.wallet_dir}")
             args = ['./epic-wallet', '-p', self.config.password, 'listen']
             self.foreign_api_process = subprocess.Popen(f"{' '.join(args)}")
+            print(f">> foreign_api running [PID: {self.foreign_api_process.pid}]!")
             time.sleep(0.3)
-            print(f">> foreign_api running [{self.foreign_api_process.pid}]!")
 
         except Exception as e:
             if 'Only one usage of each socket address' in e:
@@ -90,16 +92,24 @@ class CLIHandler:
 
     def stop_owner_api(self):
         if self.owner_api_process:
-            self.owner_api_process.kill()
-            self._encryption_key = self._token = self.owner_api_process = None
+            try: self.owner_api_process.kill()
+            except Exception as e: print(e)
+
+            self.owner_api_process = None
+            self._encryption_key = None
+            self._token = None
             print(f">> owner_api closed, encryption_key deleted")
             return
+
         print(f">> owner_api wasn't working")
 
     def stop_foreign_api(self):
         if self.foreign_api_process:
-            self.foreign_api_process.kill()
+            try: self.foreign_api_process.kill()
+            except Exception as e: print(e)
+
             self.foreign_api_process = None
             print(f">> foreign_api closed")
             return
+
         print(f">> foreign_api wasn't working")

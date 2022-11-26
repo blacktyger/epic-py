@@ -71,7 +71,7 @@ class HTTPHandler:
         """
         # Start owner_api in background, kill when closing wallet
         self.run_owner_api()
-        time.sleep(2)
+        time.sleep(1)
 
         # POST your secret.public_key and receive new api_public_key
         response = self._api_call(

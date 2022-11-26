@@ -1,5 +1,5 @@
 import time
-from typing import Union
+from typing import Union, Any
 import subprocess
 import platform
 import os
@@ -15,17 +15,24 @@ from .toml import TOMLConfig
 logger = get_logger()
 
 
+def response(error: bool = False, message: str = 'success',
+             result: Any = None) -> dict:
+    return {'error': error, 'message': message, 'result': result}
+
+
 def find_process_by_port(port: int):
     if 'windows' in platform.system().lower():
         cmd = f'''for /f "tokens=5" %a in ('netstat -aon ^| findstr {port}') do @echo %~nxa'''
         result = subprocess.getoutput(cmd)
-
         if '\n' in result:
             result = result.split('\n')[0]
 
-        return result
+        if result:
+            return result
+        else:
+            return None
     else:
-        return 0
+        return None
 
 
 def get_tx_slate_id(slate: str) -> str | None:
