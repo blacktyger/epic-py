@@ -56,6 +56,7 @@ def setup_logging(console_log_output, console_log_level, console_log_color, logf
     # for logging throughout the script. An alternative would be exporting
     # the logger, i.e. 'global logger; logger = logging.getLogger("<name>")'
     logger = logging.getLogger()
+    # logger.propagate = False
 
     # Set global log level to 'debug' (required for handler levels to work)
     logger.setLevel(logging.DEBUG)
@@ -70,19 +71,20 @@ def setup_logging(console_log_output, console_log_level, console_log_color, logf
         print("Failed to set console output: invalid output: '%s'" % console_log_output)
         return logger
 
-    console_handler = logging.StreamHandler(console_log_output)
+    if not logger.handlers:
+        console_handler = logging.StreamHandler(console_log_output)
 
-    # Set console log level
-    try:
-        console_handler.setLevel(console_log_level.upper())  # only accepts uppercase level names
-    except:
-        print("Failed to set console log level: invalid level: '%s'" % console_log_level)
-        return logger
+        # Set console log level
+        try:
+            console_handler.setLevel(console_log_level.upper())  # only accepts uppercase level names
+        except:
+            print("Failed to set console log level: invalid level: '%s'" % console_log_level)
+            return logger
 
-    # Create and set formatter, add console handler to logger
-    console_formatter = LogFormatter(fmt=log_line_template, color=console_log_color, datefmt="%d/%m %H:%M:%S")
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+        # Create and set formatter, add console handler to logger
+        console_formatter = LogFormatter(fmt=log_line_template, color=console_log_color, datefmt="%d/%m %H:%M:%S")
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
 
     # Create log file handler
     # try:

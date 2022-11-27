@@ -35,6 +35,9 @@ class WalletConfig(utils.TOMLConfig):
             'api_listen_port': self.wallet['owner_api_listen_port'],
             })
 
+    def essential(self):
+        return {'password': self.password, 'wallet_dir': self.wallet_dir}
+
     def __str__(self):
         return f"WalletConfig(path='{self.config_file}')"
 

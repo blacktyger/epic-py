@@ -1,7 +1,6 @@
-import time
 from typing import Union
 import threading
-import platform
+import time
 import json
 
 import requests
@@ -9,10 +8,7 @@ import requests
 from .. import utils
 from . import models
 
-if 'windows' in platform.system().lower():
-    import epic_wallet_rust_python as r_lib
-else:
-    SystemExit(f"Current version supports only Windows 64bit platforms.")
+import epic_wallet_rust_python as r_lib
 
 
 class EpicBoxHandler:

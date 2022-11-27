@@ -39,16 +39,16 @@ class CLIHandler:
 
         try:
             print(f">> starting owner_api {self.config.wallet_dir}")
-            args = ['./epic-wallet', '-p', self.config.password, 'owner_api']
-            self.owner_api_process = subprocess.Popen(f"{' '.join(args)}")
+            args = ['epic-wallet', '-p', self.config.password, 'owner_api']
+
+            self.owner_api_process = subprocess.Popen(args)
             print(f">> owner_api is running [PID: {self.owner_api_process.pid}]!")
 
         except Exception as e:
             if 'Only one usage of each socket address' in str(e):
                 print(f">> owner_api already running!")
             else:
-                print(f">> owner_api error, {e}")
-                self.stop_owner_api()
+                raise SystemExit(f">> owner_api error, {e}")
 
         os.chdir(cwd)
         time.sleep(0.5)
