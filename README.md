@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ## Python wrapper for Epic-Cash Node and Wallet API.
 
 ---
@@ -7,4 +8,6 @@
 ## Python wrapper for Epic-Cash Node and Wallet API.
 
 ---
+
+=======
 
