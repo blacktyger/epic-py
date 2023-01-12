@@ -36,6 +36,7 @@ class CLIHandler:
 
         cwd = os.getcwd()
         os.chdir(self.config.wallet_dir)
+        print(self.config.wallet_dir)
 
         try:
             print(f">> starting owner_api {self.config.wallet_dir}")
