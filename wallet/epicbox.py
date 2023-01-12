@@ -3,12 +3,12 @@ import threading
 import time
 import json
 
+import epic_wallet_rust_python as r_lib
 import requests
 
+from ..utils import logger
 from .. import utils
 from . import models
-
-import epic_wallet_rust_python as r_lib
 
 
 class EpicBoxHandler:
@@ -36,46 +36,45 @@ class EpicBoxHandler:
             address = address.split('//')[-1].split('@')[0]
             self.epicbox.address = address
             self.epicbox.init_config()
-            print(self.epicbox)
 
         except Exception as e:
-            print(f">> ERROR: loading epicbox config failed: {e}")
+            logger.error(f">> loading epicbox config failed: {e}")
 
         # Check connection to the epic-box server
         try:
             r = requests.get(self.epicbox.api_url)
             if r.status_code in [200, 2001]:
-                print(f">> Connected to epic-box server")
+                logger.info(f">> Connected to epic-box server")
             else:
-                print(f">> ERROR: failed connection to epic-box server \n {r.content}")
+                logger.error(f">> failed connection to epic-box server \n {r.content}")
         except Exception as e:
-            print(f">> ERROR: connecting to epicbox server failed: {e}")
+            logger.error(f">> connecting to epicbox server failed: {e}")
 
     @staticmethod
     def _parse_rust(response: str):
         if not response:
-            print(f">> ERROR: 'Unknown'")
+            logger.error(f">> ERROR: 'Unknown'")
             return None
 
         response = json.loads(response)
 
         if response['error']:
             if 'Wallet store error: DB Not Found Error' in response['message']:
-                print(f">> WARNING: Transaction already processed.")
+                logger.warning(f">> Transaction already processed.")
                 return None
             else:
-                print(f">> ERROR: '{response['message']}'")
+                logger.error(f">> '{response['message']}'")
             return None
 
         if 'success' not in response['message']:
-            print(f">> WARNING: '{response['message']}'")
+            logger.warning(f">> '{response['message']}'")
 
         return response['result']
 
     @staticmethod
     def _parse_epicbox(response: requests.Response):
         if response.status_code not in [200, 2001]:
-            print(f">> ERROR: '{response.content}'")
+            logger.error(f">> ERROR: '{response.content}'")
             return []
 
         response = response.json()
@@ -86,7 +85,7 @@ class EpicBoxHandler:
             print(f">> ERROR: '{message}'")
             return []
 
-        print(f">> EpicBoxResponse(status={status})")
+        logger.info(f">> EpicBoxResponse(status={status})")
 
         if 'is_deleted' in response:
             return response['is_deleted']
@@ -108,7 +107,7 @@ class EpicBoxHandler:
             return func(config=self.wallet_config.as_json(),
                         password=self.wallet_config.password, **kwargs)
         except Exception as e:
-            print(f">> RUST ERROR: {e}")
+            logger.error(f">> RUST ERROR: {e}")
 
     def _get_signature(self):
         """
@@ -142,7 +141,7 @@ class EpicBoxHandler:
         :return:
         """
         if not slate and not tx_slate_id:
-            print(f">> ERROR: slate or tx_slate_id is required")
+            logger.error(f">> slate or tx_slate_id is required")
             return
 
         if slate and not tx_slate_id:
@@ -220,7 +219,7 @@ class EpicBoxHandler:
             response = self._parse_rust(self._run(r_lib.process_slate_py, slate=slate))
             if response:
                 processed.append(response)
-                print(self.post_delete_tx_slate(self.epicbox.address, slate))
+                logger.info(self.post_delete_tx_slate(self.epicbox.address, slate))
 
         return processed
 
@@ -231,7 +230,7 @@ class EpicBoxHandler:
         :return:
         """
         if not finalize_slate and not tx_slate_id:
-            print(f">> ERROR: slate or tx_slate_id is required")
+            logger.error(f">> slate or tx_slate_id is required")
             return
 
         if finalize_slate and not tx_slate_id:
@@ -246,8 +245,10 @@ class EpicBoxHandler:
         transactions = self._parse_rust(self._run(r_lib.get_txs_py))
         return json.loads(transactions)
 
-    def post_cancel_transaction(self, receiving_address: str,
-                             slate: str = None, tx_slate_id: str = None) -> list:
+    def post_cancel_transaction(self,
+                                receiving_address: str,
+                                slate: str = None,
+                                tx_slate_id: str = None) -> list | dict:
         """
         Call to send cancel request to epic-box server (as sender)
         :param tx_slate_id:
@@ -256,13 +257,12 @@ class EpicBoxHandler:
         :return:
         """
         if not slate and not tx_slate_id:
-            print(f">> ERROR: slate or tx_slate_id is required")
+            logger.error(f">> slate or tx_slate_id is required")
             return []
 
         if slate and not tx_slate_id:
             tx_slate_id = utils.get_tx_slate_id(slate)
 
-        print(f">> send cancel request to epicbox server")
         url = f"{self.epicbox.api_url}/postCancel"
         payload = {'receivingAddress': receiving_address,
                    'sendersAddress': self.epicbox.address,
@@ -303,7 +303,7 @@ class EpicBoxHandler:
         :return:
         """
         if not slate and not tx_slate_id:
-            print(f">> ERROR: slate or tx_slate_id is required")
+            logger.error(f">> slate or tx_slate_id is required")
             return []
 
         if slate and not tx_slate_id:
@@ -316,14 +316,14 @@ class EpicBoxHandler:
         return self._parse_epicbox(requests.post(url=url, json=payload))
 
     def run_listening(self):
-        print(f">> Starting EPIC-BOX listener for "
+        logger.info(f">> Starting EPIC-BOX listener for "
               f"{self.epicbox.get_short_address()}")
         self.stop_listener = False
         self.listener_thread = threading.Thread(target=self._listener)
         self.listener_thread.start()
 
     def stop_listening(self):
-        print(f">> Stopping EPIC-BOX listener for "
+        logger.info(f">> Stopping EPIC-BOX listener for "
              f"{self.epicbox.get_short_address()}")
         self.stop_listener = True
 
@@ -336,19 +336,19 @@ class EpicBoxHandler:
         INTERVAL = 3
 
         while not self.stop_listener:
-            slates = self.get_tx_slates()
+            self.get_tx_slates()
             time.sleep(INTERVAL)
 
         self.listener_thread = None
 
     def _send_via_epicbox(self, amount: Union[float, int], address: str, **kwargs):
         # Prepare transaction slate with partial data
-        print('>> preparing transaction (create_tx_slate)')
+        logger.info('>> preparing transaction (create_tx_slate)')
         new_tx = self.create_tx_slate(amount=amount)
 
-        print('>> sending slate to epic-box (post_tx_slate)')
+        logger.info('>> sending slate to epic-box (post_tx_slate)')
         post_new_tx_slate = self.post_tx_slate(address, new_tx)
 
         if not post_new_tx_slate:
             deleted = self.cancel_tx_slate(slate=new_tx)
-            print(f">> Transaction {utils.get_tx_slate_id(slate=new_tx)} failed and deleted: {deleted}")
+            logger.warning(f">> Transaction {utils.get_tx_slate_id(slate=new_tx)} failed and deleted: {deleted}")
