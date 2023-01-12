@@ -47,7 +47,7 @@ def get_tx_slate_id(slate: str) -> str | None:
         slate = slate[0]
 
     if isinstance(slate, dict):
-        print(slate)
+        # print(slate)
         for k, v in slate.items():
             if re.findall(pattern, k):
                 return k
