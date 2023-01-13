@@ -6,6 +6,7 @@ import os
 import re
 
 import requests
+from killport import get_processes
 
 from .errors import NodeError
 from .logger_ import get_logger
@@ -21,16 +22,10 @@ def response(error: bool = False, message: str = 'success',
 
 
 def find_process_by_port(port: int):
-    if 'windows' in platform.system().lower():
-        cmd = f'''for /f "tokens=5" %a in ('netstat -aon ^| findstr {port}') do @echo %~nxa'''
-        result = subprocess.getoutput(cmd)
-        if '\n' in result:
-            result = result.split('\n')[0]
+    result = get_processes(ports=[port])
 
-        if result:
-            return result
-        else:
-            return None
+    if result:
+        return result[0].process.pid
     else:
         return None
 
