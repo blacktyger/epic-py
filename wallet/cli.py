@@ -36,23 +36,34 @@ class CLIHandler:
 
         cwd = os.getcwd()
         os.chdir(self.config.wallet_dir)
-        print(self.config.wallet_dir)
 
         try:
             print(f">> starting owner_api {self.config.wallet_dir}")
-            args = ['epic-wallet', '-p', self.config.password, 'owner_api']
+            args = ['epic-wallet', 'owner_api']
 
-            self.owner_api_process = subprocess.Popen(args)
+            # Add 'enter' to password and encode to bytes
+            pass_ = f"{self.config.password}\n".encode()
+
+            self.owner_api_process = subprocess.Popen(args, stdin=subprocess.PIPE)
+
+            # Provide pass as input, not argument (security)
+            self.owner_api_process.communicate(input=pass_, timeout=1)
+
             print(f">> owner_api is running [PID: {self.owner_api_process.pid}]!")
 
+        except subprocess.TimeoutExpired:
+            pass
+
         except Exception as e:
-            if 'Only one usage of each socket address' in str(e):
+            print(f"\n\n{str(e)}\n\n")
+            if 'Only one usage of each socket address' in str(e) \
+                or 'Address already in use' in str(e):
                 print(f">> owner_api already running!")
             else:
                 raise SystemExit(f">> owner_api error, {e}")
 
         os.chdir(cwd)
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     def run_foreign_api(self):
         foreign_port = self.config.wallet['api_listen_port']
@@ -76,10 +87,21 @@ class CLIHandler:
 
         try:
             print(f">> running foreign_api {self.config.wallet_dir}")
-            args = ['./epic-wallet', '-p', self.config.password, 'listen']
-            self.foreign_api_process = subprocess.Popen(f"{' '.join(args)}")
+            args = ['./epic-wallet', 'listen']
+
+            # Add 'enter' to password and encode to bytes
+            pass_ = f"{self.config.password}\n".encode()
+
+            self.foreign_api_process = subprocess.Popen(args, stdin=subprocess.PIPE)
+
+            # Provide pass as input, not argument (security)
+            self.foreign_api_process.communicate(input=pass_, timeout=1)
+
             print(f">> foreign_api running [PID: {self.foreign_api_process.pid}]!")
             time.sleep(0.3)
+
+        except subprocess.TimeoutExpired:
+            pass
 
         except Exception as e:
             if 'Only one usage of each socket address' in e:

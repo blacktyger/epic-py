@@ -54,7 +54,7 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
         self.open()
         spendable = self.retrieve_summary_info()['amount_currently_spendable']
         self.close()
-        fee = 0.007
+        fee = 0.008
         return float(spendable) > (float(amount) + fee)
 
     def send_transaction(self, method: str, amount: Union[float, int],
