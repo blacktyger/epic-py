@@ -38,7 +38,6 @@ class WalletConfig(utils.TOMLConfig):
     def essential(self, pass_path: str):
         # For security reasons 'password' key is not password itself
         # but path to encrypted file
-
         return {'password': pass_path, 'wallet_dir': self.wallet_dir}
 
     def __str__(self):
