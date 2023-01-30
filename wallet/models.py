@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 
 from .. import utils
 
+EPICBOX_DOMAIN = 'epicpost.stackwallet.com'
+EPICBOX_PORT = 0
+
 
 class WalletConfig(utils.TOMLConfig):
     def __init__(self, wallet_dir: str, password: str, **kwargs):
@@ -46,8 +49,8 @@ class WalletConfig(utils.TOMLConfig):
 
 class EpicBoxConfig(BaseModel):
     prefix: str | None = Field('epicbox')
-    domain: str | None = Field(default='epicpost.stackwallet.com')
-    port: str | None = Field(default=0)
+    domain: str | None = Field(default=EPICBOX_DOMAIN)
+    port: str | None = Field(default=EPICBOX_PORT)
     address: str | None = Field(default='')
     full_address: str | None
     api_url: str | None
