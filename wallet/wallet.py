@@ -50,12 +50,20 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
         else:
             utils.logger.warning('Failed to open wallet.')
 
-    def is_balance_enough(self, amount: float | str | int):
+    def get_balance(self):
         self.open()
-        spendable = self.retrieve_summary_info()['amount_currently_spendable']
+        balance = self.retrieve_summary_info()
         self.close()
+        return balance
+
+    def is_balance_enough(self, amount: float | str | int):
+        balance = self.get_balance()
         fee = 0.008
-        return float(spendable) > (float(amount) + fee)
+
+        if float(balance['amount_currently_spendable']) > (float(amount) + fee):
+            return balance
+        else:
+            return False
 
     def send_transaction(self, method: str, amount: Union[float, int],
                          address: str, **kwargs):
