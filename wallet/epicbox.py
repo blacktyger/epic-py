@@ -1,6 +1,4 @@
 from typing import Union
-import threading
-import time
 import json
 
 import epic_wallet_rust_python as r_lib
@@ -17,8 +15,7 @@ class EpicBoxHandler:
     """
 
     def __init__(self, wallet_config: models.WalletConfig):
-        self.listener_thread = threading.Thread
-        self.stop_listener = True
+        # self.stop_listener = True
         self.wallet_config = wallet_config
         self.epicbox: models.EpicBoxConfig
         self._load_cfg()
@@ -315,31 +312,31 @@ class EpicBoxHandler:
                    'slate': tx_slate_id}
         return self._parse_epicbox(requests.post(url=url, json=payload))
 
-    def run_listening(self):
-        logger.info(f">> Starting EPIC-BOX listener for "
-              f"{self.epicbox.get_short_address()}")
-        self.stop_listener = False
-        self.listener_thread = threading.Thread(target=self._listener)
-        self.listener_thread.start()
-
-    def stop_listening(self):
-        logger.info(f">> Stopping EPIC-BOX listener for "
-             f"{self.epicbox.get_short_address()}")
-        self.stop_listener = True
-
-    def _listener(self):
-        """
-        Background process (thread) to listen for incoming from
-        epic-box server transaction slates.
-        :return:
-        """
-        INTERVAL = 3
-
-        while not self.stop_listener:
-            self.get_tx_slates()
-            time.sleep(INTERVAL)
-
-        self.listener_thread = None
+    # def run_listening(self):
+    #     logger.info(f">> Starting EPIC-BOX listener for "
+    #           f"{self.epicbox.get_short_address()}")
+    #     self.stop_listener = False
+    #     self.listener_thread = threading.Thread(target=self._listener)
+    #     self.listener_thread.start()
+    #
+    # def stop_listening(self):
+    #     logger.info(f">> Stopping EPIC-BOX listener for "
+    #          f"{self.epicbox.get_short_address()}")
+    #     self.stop_listener = True
+    #
+    # def _listener(self):
+    #     """
+    #     Background process (thread) to listen for incoming from
+    #     epic-box server transaction slates.
+    #     :return:
+    #     """
+    #     INTERVAL = 3
+    #
+    #     while not self.stop_listener:
+    #         self.get_tx_slates()
+    #         time.sleep(INTERVAL)
+    #
+    #     self.listener_thread = None
 
     def _send_via_epicbox(self, amount: Union[float, int], address: str, **kwargs):
         # Prepare transaction slate with partial data

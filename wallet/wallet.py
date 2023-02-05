@@ -63,7 +63,7 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
         if float(balance['amount_currently_spendable']) > (float(amount) + fee):
             return balance
         else:
-            return False
+            return None
 
     def send_transaction(self, method: str, amount: Union[float, int],
                          address: str, **kwargs):
@@ -82,4 +82,4 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
             raise SystemExit(f"'{method}' method not supported, use 'http' or 'epicbox'")
 
     def __str__(self):
-        return f"EpicWallet(wallet_dir='{self.wallet_dir}')"
+        return f"EpicWallet(wallet_dir='{self.config.wallet_dir}')"
