@@ -100,6 +100,9 @@ class EpicBoxHandler:
         :param kwargs:
         :return:
         """
+        print(f"\n"
+              f"{self.wallet_config.as_json()}"
+              f"\n")
         try:
             return func(config=self.wallet_config.as_json(),
                         password=self.wallet_config.password, **kwargs)

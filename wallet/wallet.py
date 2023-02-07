@@ -1,3 +1,5 @@
+import os
+import subprocess
 from typing import Union
 
 from .key_manager import KeyManager
@@ -28,7 +30,7 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
             HTTPHandler.__init__(self, self.config)
             CLIHandler.__init__(self, self.config)
 
-        print(f">> Epic-Cash wallet successfully initialized.")
+            print(f">> Epic-Cash Wallet (version {self.get_version()}) fully initialized.")
 
     def load_config(self, wallet_dir: str, password: str):
         """load wallet config from *.toml file"""
@@ -50,6 +52,14 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
         else:
             utils.logger.warning('Failed to open wallet.')
 
+    def get_version(self):
+        cwd = os.getcwd()
+        os.chdir(self.config.wallet_dir)
+        version = subprocess.check_output(['./epic-wallet',  '--version'])
+        version = version.decode().strip('\n').split(' ')[-1]
+        os.chdir(cwd)
+        return version
+
     def get_balance(self):
         self.open()
         balance = self.retrieve_summary_info()
@@ -59,7 +69,6 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
     def is_balance_enough(self, amount: float | str | int):
         balance = self.get_balance()
         fee = 0.008
-
         if float(balance['amount_currently_spendable']) > (float(amount) + fee):
             return balance
         else:
