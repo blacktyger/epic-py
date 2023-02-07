@@ -195,7 +195,7 @@ class HTTPHandler:
             'tx_id': tx_id,
             'tx_slate_id': tx_slate_id,
             }
-        resp = self._secure_api_call('cancel_tx', params)
+        self._secure_api_call('cancel_tx', params)
         return {'tx_id': tx_id, 'tx_slate_id': tx_slate_id}
 
     def scan(self, start_height=0, delete_unconfirmed=False):
