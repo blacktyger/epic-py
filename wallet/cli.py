@@ -39,7 +39,7 @@ class CLIHandler:
 
         try:
             print(f">> starting owner_api {self.config.wallet_dir}")
-            args = ['epic-wallet', 'owner_api']
+            args = ['./epic-wallet', 'owner_api']
 
             # Add 'enter' to password and encode to bytes
             pass_ = f"{self.config.password}\n".encode()
