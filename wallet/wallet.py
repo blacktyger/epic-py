@@ -1,16 +1,15 @@
-import os
-import subprocess
 from typing import Union
+import subprocess
+import os
 
 from .key_manager import KeyManager
-from .epicbox import EpicBoxHandler
 from .http import HTTPHandler
 from .cli import CLIHandler
 from .. import utils
 from . import models
 
 
-class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
+class Wallet(HTTPHandler, CLIHandler, KeyManager):
     """
     Main class to manage Epic-Cash cli wallet through different methods
     :param wallet_dir: str, REQUIRED,  path to the top level wallet directory
@@ -26,7 +25,6 @@ class Wallet(HTTPHandler, CLIHandler, KeyManager, EpicBoxHandler):
         KeyManager.__init__(self, **kwargs)
 
         if self.config:
-            EpicBoxHandler.__init__(self, self.config)
             HTTPHandler.__init__(self, self.config)
             CLIHandler.__init__(self, self.config)
 
