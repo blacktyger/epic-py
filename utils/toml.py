@@ -36,7 +36,7 @@ class TOMLConfig:
         except Exception as e:
             print(str(e))
 
-    def get(self, category, sub_category, key):
+    def get(self, category, key, sub_category=None):
         if self._valid_file():
             self._load_from_file()
             try:
@@ -47,7 +47,7 @@ class TOMLConfig:
             except Exception:
                 print(f'"[{category}] {sub_category} {key}" key does not exists')
 
-    def set(self, category, sub_category, key, value):
+    def set(self, category, key, value, sub_category=None):
         if self._valid_file():
             self._load_from_file()
             try:

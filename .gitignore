@@ -5,3 +5,5 @@ epic_sdk.egg-info/
 /Pipfile.lock
 /utils/wallet_*/
 /utils/epic-wallet
+/env/
+../.idea/
