@@ -67,7 +67,7 @@ def create(**kwargs):
 
     # Add 'enter' to password and encode to bytes
     pass_ = f"{model.password}\n".encode()
-    args = f"./{model.binary_name} -r {PUBLIC_NODE} -p {PASSWORD} init -h"
+    args = f"./{model.binary_name} -r {model.node_address} -p {PASSWORD} init -h"
 
     # Create new wallet and its directories
     subprocess.Popen(args.split(' '))
