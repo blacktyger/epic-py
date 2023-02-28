@@ -1,35 +1,35 @@
-import time
 from typing import Any
 import subprocess
 import uuid
+import time
 import os
 
 from pydantic import BaseModel, Field
 import tomlkit
 import psutil
 
-from utils import logger, find_process_by_port, defaults
-from utils.secret_manager import get_secret_value
-
-
-EPICBOX_DOMAIN = 'epic.tech'
-EPICBOX_PORT = 0
+from utils import *
+from utils import secret_manager
 
 
 class Account(BaseModel):
     id: int
-    name: str
+    path: str
+    label: str
 
-    def __str__(self):
+    def __repr__(self):
         return f"Account({self.name}, [{self.id}])"
 
 
 class Settings(BaseModel):
-    def __init__(self, file_path: str, **data: Any):
+    file_path: str
+    tor: dict = {}
+    wallet: dict = {}
+    logging: dict = {}
+    epicbox: dict = {}
+
+    def __init__(self, **data: Any):
         super().__init__(**data)
-        self.file_name = data['file_name'] \
-            if 'file_name' in data else 'epic-wallet.toml'
-        self.file_path = os.path.join(file_path, self.file_name)
 
         if not self._valid_file():
             raise SystemExit("Invalid *.toml file path") from None
@@ -51,7 +51,6 @@ class Settings(BaseModel):
             print(str(e))
 
     def _save_to_file(self):
-        print(self.dict(exclude={'path'}))
         try:
             with open(self.file_path, 'wt', encoding="utf-8") as file:
                 tomlkit.dump(self.dict(exclude={'path'}), file)
@@ -69,23 +68,24 @@ class Settings(BaseModel):
             print(f'"[{category}] {sub_category} {key}" key does not exists')
 
     def set(self, category, key, value, sub_category=None):
+
         self._load_from_file()
-        try:
-            if sub_category:
-                setattr(self, category, sub_category[key][value])
-            else:
-                setattr(self, category, key[value])
-        except Exception as e:
-            print(e)
+        if sub_category:
+            data_ = getattr(self, category)
+            data_[key][sub_category] = value
+        else:
+            data_ = getattr(self, category)
+            data_[key] = value
+
+        setattr(self, category, data_)
 
         self._save_to_file()
 
 
 class Config(BaseModel):
-    REQUIRED: tuple = ('binary_path', 'password')
-
     id: str = str(uuid.uuid4())
     name: str = f'wallet_{id}'
+    debug: bool = True,
     network: str = 'mainnet'
     password: str = None
     binary_path: str = None
@@ -106,77 +106,95 @@ class Config(BaseModel):
             self.wallet_data_directory = os.path.join(os.getcwd(), self.name)
 
 
-class Listener(BaseModel):
-    settings: Settings
-    process: psutil.Process | None = None
-    config: Config
+class Listener:
+    def __init__(self, settings, config, method):
+        self.settings: Settings = settings
+        self.process: psutil.Process | None = None
+        self.config: Config = config
+        self.method: str = method
 
-    def run(self, method: str):
-        match method:
+    def run(self, **kwargs):
+        flags = None
+        password = secret_manager.get_value(self.config.password)
+        method_flag = f'--method {self.method}'
+        listen_port = None
+
+        arguments = f"./{self.config.binary_name} -p {password}"
+
+        match self.method:
             case 'http':
-                key, sub_cat = 'api_listen_port', None
-                subcommand = 'listen'
-            case 'owner':
-                key, sub_cat = 'owner_api_listen_port', None
-                subcommand = 'owner_api'
+                listen_port = 'api_listen_port'
+                command = 'listen'
+                flags = method_flag
+            case 'owner_api':
+                listen_port = 'owner_api_listen_port'
+                command = 'owner_api'
             case 'epicbox':
-                key, sub_cat = None, None
-                subcommand = 'listen'
+                command = 'listen'
+                flags = method_flag
+
+                if 'interval' in kwargs:
+                    interval = kwargs['interval']
+                    flags += f" --interval {interval}"
             case _:
-                logger.error(f'"{method}" is not a valid listening method')
+                logger.error(f'"{self.method}" is not a valid listening method')
                 return
 
-        if key:
-            port = self.settings.get(category='wallet', key=key, sub_category=sub_cat)
-            external_process_pid = find_process_by_port(port)
+        arguments += f" {command}"
+        if flags: arguments += f" {flags}"
+
+        if listen_port:
+            listen_port = self.settings.get(category='wallet', key=listen_port)
+            external_process_pid = find_process_by_port(listen_port)
 
             if external_process_pid not in (None, 0, '0'):
                 self.process = psutil.Process(int(external_process_pid))
-                logger.warning(f"{method} listener already running! {self.process.pid}")
+                logger.info(f"{self.method} listener already running! PID: {self.process.pid}]..")
                 return self
 
         if self.process:
             if psutil.pid_exists(self.process.pid):
-                logger.warning(f"{method} listener already running! {self.process.pid}")
+                logger.info(f"{self.method} listener already running [PID: {self.process.pid}]..")
                 return self
             else:
-                logger.warning(f"{method} listener process is not None, "
+                logger.warning(f"{self.method} listener process is not None, "
                                f"but not running in system: {self.process}")
 
-        elif not self.settings:
+        elif not self.settings or not self.config:
             logger.warning(f"wallet config not provided")
             return
 
+        # Save current working directory to go back to it when finished
         cwd = os.getcwd()
         os.chdir(self.config.wallet_data_directory)
 
         try:
-            args = f"./{self.config.binary_name} {subcommand}"
-            if method in ['http', 'epicbox']: args += f" -m {method}"
-            process = subprocess.Popen(args.split(' '), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-            # Provide pass as input, not argument (security)
-            pass_ = get_secret_value(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}")
-            process.communicate(input=pass_, timeout=1)
-
-            logger.info(f">> {method} listener is running [PID: {process.pid}]!")
+            process = subprocess.Popen(arguments.split(' '), text=True, start_new_session=True)
+            logger.info(f">> {self.method} listener is running [PID: {process.pid}]..")
             self.process = psutil.Process(int(process.pid))
-
-        except subprocess.TimeoutExpired:
-            pass
-
         except Exception as e:
             if 'Only one usage of each socket address' in str(e) \
                 or 'Address already in use' in str(e):
-                logger.warning(f">> {method} listener already running!")
+                logger.warning(f">> {self.method} listener already running?")
             else:
                 logger.error(f"\n\n{str(e)}\n\n")
         os.chdir(cwd)
-        time.sleep(0.3)
 
         return self
-#
-#
+
+    def __repr__(self):
+        return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"
+
+    def stop(self):
+        if self.process:
+            try: self.process.kill()
+            except Exception as e: logger.warning(e)
+
+            self.process = None
+            logger.info(f"'{self.method}' listener closed")
+        else:
+            logger.warning(f"'{self.method}' listener wasn't working")
+
 # class WalletConfig(utils.TOMLConfig):
 #     def __init__(self, wallet_dir: str, password: str, **kwargs):
 #         self.config_file = os.path.join(wallet_dir, 'epic-wallet.toml')
@@ -201,8 +219,8 @@ class Listener(BaseModel):
 class EpicBoxConfig(BaseModel):
     address: str | None = Field(default='')
     prefix: str | None = Field('epicbox')
-    domain: str | None = Field(default=EPICBOX_DOMAIN)
-    port: str | None = Field(default=EPICBOX_PORT)
+    domain: str | None = Field(default=defaults.EPICBOX_NODE)
+    port: str | None = Field(default=defaults.EPICBOX_PORT)
     full_address: str | None
 
     def __init__(self, **data: Any):

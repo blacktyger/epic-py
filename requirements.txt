@@ -4,6 +4,7 @@ cffi==1.15.1
 charset-normalizer==3.0.1
 coincurve==18.0.0
 cryptography==39.0.1
+pycryptodome
 killport==1.2.0
 mnemonic==0.20
 psutil==5.9.4

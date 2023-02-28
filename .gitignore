@@ -7,3 +7,6 @@ epic_sdk.egg-info/
 /utils/epic-wallet
 /env/
 ../.idea/
+.idea/
+/utils/test.py
+tests/

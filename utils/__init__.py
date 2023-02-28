@@ -8,7 +8,8 @@ import requests
 
 from .logger_ import get_logger
 from .errors import NodeError
-
+from . import secret_manager as secrets
+from . import defaults
 
 logger = get_logger()
 
