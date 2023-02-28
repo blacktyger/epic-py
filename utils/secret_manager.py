@@ -29,11 +29,11 @@ except OSError:
     pass
 
 
-def get_secret_value(path: str):
+def get_value(path: str):
     """Return value stored with `pass` manager"""
     return store.get_key(path=path).strip()
 
 
-def set_secret_value(path: str, value):
+def set_value(path: str, value):
     """Sety new key:value stored with `pass` manager"""
     return store.set_key(path=path, key_data=value, force=False)

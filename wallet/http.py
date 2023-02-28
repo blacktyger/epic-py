@@ -1,5 +1,3 @@
-import time
-from http.client import RemoteDisconnected
 from typing import Union
 import base64
 import json
@@ -9,27 +7,30 @@ from coincurve import PublicKey, PrivateKey
 from Crypto.Cipher import AES
 import requests
 
-from .. import utils
-from . import models
+import utils
 
 
-class HTTPHandler:
+class HttpAPIServer:
     auth_user = 'epic'
     owner_api_version = 'v3'
     foreign_api_version = 'v2'
 
-    def __init__(self, config: models.WalletConfig):
-        self.config = config
+    def __init__(self, settings):
+        self.settings = settings
         self._encryption_key: str = ''
         self._secret: PrivateKey = PrivateKey(os.urandom(32))
         self._token: str = ''
 
-        settings_ = self.config.wallet
+        settings_ = self.settings.wallet
         self.foreign_api = f"http://{settings_['api_secret_path']}:{settings_['api_listen_port']}/" \
                            f"{self.foreign_api_version}/foreign",
         self.owner_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/" \
                          f"{self.owner_api_version}/owner",
         self.auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
+
+    @property
+    def token(self):
+        return self._token
 
     def _secure_api_call(self, method: str, params: dict) -> dict:
         """
@@ -40,9 +41,9 @@ class HTTPHandler:
         """
         if not self._encryption_key:
             try:
-                self._init_secure_api()
+                self.init_secure_api()
             except:
-                raise Exception('Need encryption key, call _init_secure_api() first.')
+                raise Exception('Need encryption key, call init_secure_api() first.')
 
         payload = {
             'jsonrpc': '2.0',
@@ -64,15 +65,12 @@ class HTTPHandler:
 
         return utils.parse_api_response(json.loads(decrypted_response))
 
-    def _init_secure_api(self) -> None:
+    def init_secure_api(self) -> None:
         """
         This is the first step in epic-wallet API workflow
         Initialize process of computing encryption_key to encrypt all future api_calls
         :return: None, save encryption key to instance variable
         """
-        # Start owner_api in background, kill when closing wallet
-        self.run_owner_api()
-        time.sleep(1)
 
         # POST your secret.public_key and receive new api_public_key
         response = self._api_call(
@@ -90,7 +88,7 @@ class HTTPHandler:
         # format to hex and remove first 2 bits
         self._encryption_key = self._encryption_key.format().hex()[2:]
 
-    def _open_wallet(self, password: str, name: str = None) -> None:
+    def open_wallet(self, password: str, name: str = None) -> None:
         """
         This is the second step in epic-wallet API workflow
         Make api_call to open_wallet instance, get authentication token and use it
@@ -297,7 +295,6 @@ class HTTPHandler:
             'name': name,
             }
         resp = self._secure_api_call('close_wallet', params)
-        self.stop_owner_api()
         return True
 
     def create_account_path(self, label):
@@ -329,9 +326,7 @@ class HTTPHandler:
         self._secure_api_call('delete_wallet', params)
         return True
 
-    def get_mnemonic(self, password: str = None, name: str = None):
-        if not password: password = self.config.password
-
+    def get_mnemonic(self, password: str, name: str = None):
         params = {
             'name': name,
             'password': password,
@@ -404,10 +399,8 @@ class HTTPHandler:
         resp = self._secure_api_call('verify_payment_proof', params)
         return resp
 
-    def create_wallet(self, password: str = None, name: str = None,
+    def create_wallet(self, password: str, name: str = None,
                       mnemonic: str = None, mnemonic_length: int = 24):
-        if not password: password = self.config.password
-
         params = {
             'name': name,
             'password': password,
@@ -485,7 +478,7 @@ class HTTPHandler:
     def _encrypt(self, payload) -> dict:
         """
         Encrypt api_call JSON payload with:
-         - 32bit secp256k1 ecdh encryption key computed via _init_secure_api()_ func,
+         - 32bit secp256k1 ecdh encryption key computed via init_secure_api()_ func,
          - 12bit nonce,
          - 16bit tag
         :param payload: json payload to encrypt
@@ -531,6 +524,9 @@ class HTTPHandler:
         try:
             response = requests.post(api_url, json=payload, auth=self.auth)
             return utils.parse_api_response(response)
-        except (requests.exceptions.ConnectionError, RemoteDisconnected):
-            self.stop_owner_api()
+        except Exception:
             raise SystemExit(f'Connection error, is wallet owner_api running under: {api_url}?')
+
+    @property
+    def encryption_key(self):
+        return self._encryption_key
