@@ -17,6 +17,14 @@ wallet_secret = '.owner_api_secret'
 wallet_api_port = 3415
 wallet_owner_port = 3420
 
+PASSWORD_STORAGE_PATH = "Wallets/passwords"
+EPICBOX_NODE = 'epicbox.fastepic.eu'
+SOURCE_PATH = "/home/blacktyger/epic-wallet/target/release"
+PUBLIC_NODE = 'https://fastepic.eu:3413'
+BINARY_NAME = 'epic-wallet'
+PASSWORD = 'majkut11'
+NETWORK = 'mainnet'
+
 class Node:
     api_addr = '127.0.0.1'
     binary_name = f"epic{bin_ext}"
