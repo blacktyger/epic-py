@@ -32,7 +32,8 @@ class HTTPHandler:
         self.auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
 
     def _secure_api_call(self, method: str, params: dict) -> dict:
-        """Execute secure owner_api call, payload is encrypted
+        """
+        Execute secure owner_api call, payload is encrypted
         :param method: api call method name
         :param params: dict with api_call params
         :return: dict with decrypted data
@@ -308,12 +309,14 @@ class HTTPHandler:
         resp = self._secure_api_call('create_account_path', params)
         return resp
 
-    def create_config(self, chain_type: str = "Mainnet", wallet_config: dict = None,
-                      logging_config: dict = None, tor_config: dict = None):
+    def create_config(
+        self, chain_type: str = "Mainnet", wallet_config: dict = None,
+        logging_config: dict = None, tor_config: dict = None, epicbox_config: dict = None):
         params = {
             'chain_type': chain_type,
             'wallet_config': wallet_config,
             'logging_config': logging_config,
+            'epicbox_config': epicbox_config,
             'tor_config': tor_config,
             }
         self._secure_api_call('create_config', params)
@@ -371,7 +374,6 @@ class HTTPHandler:
             'dir': dir_path,
             }
         self._secure_api_call('set_top_level_directory', params)
-        self.stop_owner_api()
         return True
 
     def set_tor_config(self, tor_config=None):

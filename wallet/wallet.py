@@ -1,7 +1,10 @@
 from typing import Union
 import subprocess
+import shutil
 import os
 
+from utils import defaults
+from utils.secret_manager import set_secret_value, get_secret_value
 from .key_manager import KeyManager
 from .http import HTTPHandler
 from .cli import CLIHandler
@@ -9,30 +12,75 @@ from .. import utils
 from . import models
 
 
-class Wallet(HTTPHandler, CLIHandler, KeyManager):
+class Wallet:
     """
     Main class to manage Epic-Cash cli wallet through different methods
     :param wallet_dir: str, REQUIRED,  path to the top level wallet directory
            default '~/.epic/main/' or '%USERPROFILE%/.epic/main/'. Wallet will
            look for `wallet_data` dir with `wallet.seed` file inside
     """
+    config: models.Config = None
+    settings: models.Settings = None
+    accounts: list[models.Account] = []
+    listeners: list[models.Listener] = []
 
-    def __init__(self, wallet_dir: str, password: str, **kwargs):
-        self.config = models.WalletConfig(wallet_dir, password, **kwargs)
-        self.state = None
-        self.is_locked = False
+    def create_new(self, **kwargs):
+        # Make sure all the required arguments are provided
+        if not all(arg in kwargs for arg in self.config.REQUIRED):
+            raise SystemExit(f'Missing required argument/s, provide all: {self.config.REQUIRED}') from None
 
-        KeyManager.__init__(self, **kwargs)
+        self.config = models.Config(**kwargs)
+        source_full_path = os.path.join(self.config.binary_name, self.config.binary_name)
 
-        if self.config:
-            HTTPHandler.__init__(self, self.config)
-            CLIHandler.__init__(self, self.config)
+        # Make sure source wallet-cli file exists
+        if not os.path.isfile(source_full_path):
+            raise SystemExit(f'Invalid wallet-cli {source_full_path} binary file path') from None
 
-            print(f">> Epic-Cash Wallet (version {self.get_version()}) fully initialized.")
+        # Create new top_dir wallet directory and copy source binary there
+        os.makedirs(self.config.wallet_data_directory, exist_ok=True)
+        shutil.copy(source_full_path, self.config.wallet_data_directory)
+        os.chdir(self.config.wallet_data_directory)
 
-    def load_config(self, wallet_dir: str, password: str):
-        """load wallet config from *.toml file"""
-        self.config = models.WalletConfig(wallet_dir, password)
+        # Build full wallet init command
+        args = f"./{self.config.binary_name} -r {self.config.node_address} -p {self.config.password} init -h"
+
+        # Create new wallet and its init data
+        subprocess.Popen(args.split(' ')).wait()
+
+        # Load created by wallet settings file to WalletTOML model
+        self.settings = models.Settings(file_path=self.config.wallet_data_directory)
+
+        # Update / override default wallet settings
+        if self.config.node_address:
+            self.settings.set(category='wallet', key='check_node_api_http_addr', value=self.config.node_address)
+
+        if self.config.epicbox_address:
+            self.settings.set(category='epicbox', key='epicbox_domain', value=self.config.epicbox_address)
+
+        if 'debug' in kwargs and kwargs['debug']:
+            self.settings.set(category='logging', key='stdout_log_level', value="DEBUG")
+            self.settings.set(category='logging', key='file_log_level', value="DEBUG")
+
+        # Save password to secure storage with pass manager
+        set_secret_value(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
+        self.config.password = None
+
+        # Run owner listener to access wallet HTTP API
+        listener_ = models.Listener(settings=self.settings, config=self.config)
+        self.listeners += listener_.run(method='http')
+
+        # Add default account created with wallet initialization
+        self.accounts += models.Account()
+
+        # Show wallet info
+        args = f'./{self.config.binary_name} info'
+        info_wallet = subprocess.Popen(args.split(' '), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+
+        # Provide pass as input, not argument (security)
+        print(info_wallet.communicate(
+            input=get_secret_value(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"))[0])
+
+        return self
 
     def open(self, password: str = None):
         """
