@@ -1,5 +1,7 @@
 from typing import Union, Any
 import subprocess
+import functools
+import time
 import os
 import re
 
@@ -12,6 +14,27 @@ from . import secret_manager as secrets
 from . import defaults
 
 logger = get_logger()
+
+
+def benchmark(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        stop = time.time()
+        logger.warning(f">> BENCHMARK: {func.__name__} took {(stop-start):.4f} seconds")
+        return result
+    return wrapper
+
+
+def return_to_cwd(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        cwd = os.getcwd()
+        result = func(*args, **kwargs)
+        os.chdir(cwd)
+        return result
+    return wrapper
 
 
 def response(error: bool = False, message: str = 'success',

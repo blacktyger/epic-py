@@ -1,9 +1,9 @@
 import shutil
 import time
 
-from .http import HttpAPIServer
-from utils import *
+from .http import HttpServer
 from . import models
+from utils import *
 
 
 class Wallet:
@@ -16,11 +16,11 @@ class Wallet:
     config: models.Config
     settings: models.Settings
     accounts: list[models.Account] = []
-    listeners: list[models.Listener] = []
+    cached_balance: models.Balance
+    api_http_server: HttpServer
 
-    class API:
-        http: HttpAPIServer
-
+    @return_to_cwd
+    @benchmark
     def create_new(self, **kwargs):
         # Make sure all the required arguments are provided
         REQUIRED = ('binary_path', 'password')
@@ -49,7 +49,7 @@ class Wallet:
         # Load created by wallet settings file to WalletTOML model
         settings_file = f"{os.path.join(self.config.wallet_data_directory, self.config.binary_name)}.toml"
         self.settings = models.Settings(file_path=settings_file)
-        self.API.http = HttpAPIServer(settings=self.settings)
+        self.api_http_server = HttpServer(self.settings, self.config)
 
         # Update / override default wallet settings
         if self.config.node_address:
@@ -62,66 +62,31 @@ class Wallet:
             self.settings.set(category='logging', key='stdout_log_level', value="DEBUG")
             self.settings.set(category='logging', key='file_log_level', value="DEBUG")
 
-        # Save password to secure storage with pass manager and store in object only reference to it
-        secrets.set_value(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
+        # Save password to secure storage with pass manager and store only reference to it
+        secrets.set(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
         self.config.password = f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"
+        self.config.to_toml()
+        self.config = self.config.from_toml('config.toml')
+        # Use HTTP API (owner and foreign) as context manager,
+        # api calls are encrypted with token created only for current session
+        with self.api_http_server as provider:
 
-        # Run owner listener to access wallet HTTP API
-        # for method in ['http', 'owner_api', 'epicbox']:
-        listener_ = models.Listener(settings=self.settings, config=self.config, method='owner_api')
-        self.listeners.append(listener_.run())
-        print(self.listeners)
+            # Get wallet accounts (usually just one, 'default') and load to the Account object
+            for i, acc in enumerate(provider.accounts()):
+                self.accounts.append(models.Account(id=i, **acc))
+            print(self.accounts)
 
-        # Add some time for listener to kick in before running API calls
-        time.sleep(0.4)
-
-        print(self.open())
-
-        accounts = self.API.http.accounts()
-
-        for i, acc in enumerate(accounts):
-            acc['id'] = i
-            self.accounts.append(models.Account(**acc))
-
-        print(self.accounts)
-
-        listener_.stop()
-
-        # # Add default account created with wallet initialization
-        # self.accounts += models.Account()
-
-        # Show wallet info
-        # args = f'./{self.config.binary_name} info'
-        # info_wallet = subprocess.Popen(args.split(' '), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-        # # Provide pass as input, not argument (security)
-        # print(info_wallet.communicate(
-        #     input=get_secret_value(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"))[0])
+            # Get wallet balances
+            self.cached_balance = models.Balance(**provider.retrieve_summary_info())
+            print(self.cached_balance)
 
         return self
 
-    def open(self):
-        """
-        Start secure encrypted connection to the wallet's owner API
-        and generate token used for the further communication
-        :param password: str, wallet password
-        """
-
-        self.API.http.init_secure_api()
-        print(self.config.password)
-        self.API.http.open_wallet(secrets.get_value(self.config.password))
-
-        if self.API.http.encryption_key and self.API.http.token:
-            logger.info('Wallet initialized with owner access.')
-        else:
-            logger.warning('Failed to open wallet.')
-
+    @return_to_cwd
     def get_version(self):
-        cwd = os.getcwd()
-        os.chdir(self.config.wallet_dir)
+        os.chdir(self.config.wallet_data_directory)
         version = subprocess.check_output(['./epic-wallet',  '--version'])
         version = version.decode().strip('\n').split(' ')[-1]
-        os.chdir(cwd)
         return version
 
     def get_balance(self):

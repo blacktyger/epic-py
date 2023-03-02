@@ -22,6 +22,7 @@ EPICBOX_NODE = 'epicbox.fastepic.eu'
 EPICBOX_PORT = 443
 SOURCE_PATH = "/home/blacktyger/epic-wallet/target/release"
 PUBLIC_NODE = 'https://fastepic.eu:3413'
+LOCAL_NODE = "http://127.0.0.1:3413"
 BINARY_NAME = 'epic-wallet'
 PASSWORD = 'majkut11'
 NETWORK = 'mainnet'

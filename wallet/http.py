@@ -1,6 +1,7 @@
 from typing import Union
 import base64
 import json
+import time
 import os
 
 from coincurve import PublicKey, PrivateKey
@@ -8,18 +9,32 @@ from Crypto.Cipher import AES
 import requests
 
 import utils
+from . import models
 
+class HttpServer:
+    """
+    Can be used as context manager, it will take care of the background processes,
+    wallet authorization, data encryption and proper exit handling.
+    ```
+        http_server = HttpServer(**kwargs)
 
-class HttpAPIServer:
+        with http_server as provider:
+            provider.retrieve_summary_info()
+            ...
+    ```
+    """
+
     auth_user = 'epic'
     owner_api_version = 'v3'
     foreign_api_version = 'v2'
+    listeners: list[models.Listener] = []
 
-    def __init__(self, settings):
+    def __init__(self, settings, config):
         self.settings = settings
-        self._encryption_key: str = ''
-        self._secret: PrivateKey = PrivateKey(os.urandom(32))
+        self.config = config
         self._token: str = ''
+        self._secret: PrivateKey = PrivateKey(os.urandom(32))
+        self._encryption_key: str = ''
 
         settings_ = self.settings.wallet
         self.foreign_api = f"http://{settings_['api_secret_path']}:{settings_['api_listen_port']}/" \
@@ -27,10 +42,6 @@ class HttpAPIServer:
         self.owner_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/" \
                          f"{self.owner_api_version}/owner",
         self.auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
-
-    @property
-    def token(self):
-        return self._token
 
     def _secure_api_call(self, method: str, params: dict) -> dict:
         """
@@ -40,10 +51,7 @@ class HttpAPIServer:
         :return: dict with decrypted data
         """
         if not self._encryption_key:
-            try:
-                self.init_secure_api()
-            except:
-                raise Exception('Need encryption key, call init_secure_api() first.')
+            raise Exception('Need encryption key, call init_secure_api() first.')
 
         payload = {
             'jsonrpc': '2.0',
@@ -65,7 +73,19 @@ class HttpAPIServer:
 
         return utils.parse_api_response(json.loads(decrypted_response))
 
-    def init_secure_api(self) -> None:
+    def __enter__(self):
+        try:
+            self._run_server(method="owner_api")
+            self._init_secure_api()
+            return self._open_wallet()
+
+        except Exception as e:
+            utils.logger.error(f"{e}")
+
+    def __exit__(self, *args):
+        self._close_wallet()
+
+    def _init_secure_api(self) -> None:
         """
         This is the first step in epic-wallet API workflow
         Initialize process of computing encryption_key to encrypt all future api_calls
@@ -82,35 +102,48 @@ class HttpAPIServer:
         api_public_key = PublicKey(bytes.fromhex(response)).format()
 
         # Compute new encryption_key used for further encryption every api_call
-        # that is multiply generated secret by received api_public_key
+        # in this session
         self._encryption_key = PublicKey(api_public_key).multiply(self._secret.secret)
 
         # format to hex and remove first 2 bits
         self._encryption_key = self._encryption_key.format().hex()[2:]
 
-    def open_wallet(self, password: str, name: str = None) -> None:
+    def _open_wallet(self):
         """
         This is the second step in epic-wallet API workflow
         Make api_call to open_wallet instance, get authentication token and use it
         in all future api_calls for this wallet instance
-        :param name: optional, default None
-        :param password: epic-wallet cli (with owner_api listener running) password
-        :return: None, save token to instance variable
         """
 
         params = {
-            'name': name,
-            'password': password,
+            'name': 'default',
+            'password': utils.secrets.get(self.config.password),
             }
         self._token = self._secure_api_call('open_wallet', params)
+
+        return self
+
+    def _run_server(self, method: str):
+        """
+        Run owner listener (local HTTP API server) to access wallet functions
+        """
+        listener = models.Listener(settings=self.settings, config=self.config, method=method)
+        self.listeners.append(listener.run(force_run=True))
+        time.sleep(1)
+        return self.listeners[-1]
+
+    def _close_wallet(self):
+        self.close()
+        for listener in self.listeners:
+            listener.stop()
 
     def _send_via_http(self, amount: Union[float, int], address: str, **kwargs):
         # Prepare transaction slate with partial data
         print('>> preparing transaction (init_send_tx)')
         transaction = self._prepare_slate(amount, **kwargs)
+        address = f'{address}/{self.foreign_api_version}/foreign'
         tx = self.init_send_tx(transaction)
 
-        address = f'{address}/{self.foreign_api_version}/foreign'
         # Lock sender's outputs for transaction
         print('>> locking funds (lock_outputs)')
         self.tx_lock_outputs(tx)
@@ -471,7 +504,6 @@ class HttpAPIServer:
         if os.path.isfile(secret):
             with open(secret, 'r') as f:
                 wallet_secret = f.read()
-            print(wallet_secret, secret)
             return wallet_secret
         else:
             return secret
@@ -527,7 +559,3 @@ class HttpAPIServer:
             return utils.parse_api_response(response)
         except Exception:
             raise SystemExit(f'Connection error, is wallet owner_api running under: {api_url}?')
-
-    @property
-    def encryption_key(self):
-        return self._encryption_key
