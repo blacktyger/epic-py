@@ -1,3 +1,4 @@
+import datetime
 import uuid
 
 from pydantic import BaseModel, Field
@@ -19,23 +20,27 @@ class Account(BaseModel):
 
 
 class Balance(BaseModel):
-    amount_awaiting_confirmation: int
-    amount_awaiting_finalization: int
-    amount_currently_spendable: int
-    last_confirmed_height: int
-    minimum_confirmations: int
-    amount_immature: int
-    amount_locked: int
-    total: int
+    amount_awaiting_confirmation: float
+    amount_awaiting_finalization: float
+    amount_currently_spendable: float
+    last_confirmed_height: float
+    minimum_confirmations: float
+    amount_immature: float
+    amount_locked: float
+    timestamp: datetime.datetime
+    total: float
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        ignore_fields = ('minimum_confirmations', 'last_confirmed_height')
 
+        # Change value format to human-readable floats from 100000000 to 1.0
         for k, v in kwargs.items():
-            if k not in ('minimum_confirmations', 'last_confirmed_height'):
-                # Change value format to human-readable floats
-                v = int(v) / 10 ** 8
-                setattr(self, k, v)
+            if k not in ignore_fields:
+                kwargs[k] = int(v) / 10 ** 8
+
+        kwargs['timestamp'] = datetime.datetime.now()
+
+        super().__init__(**kwargs)
 
     @property
     def awaiting_confirmation(self):
@@ -230,7 +235,7 @@ class Listener:
         try:
             os.chdir(self.config.wallet_data_directory)
             process = subprocess.Popen(arguments.split(' '), text=True, start_new_session=True)
-            logger.info(f">> {self.method} listener is running [PID: {process.pid}]..")
+            logger.info(f">> {self.method} listener started [PID: {process.pid}]..")
             self.process = psutil.Process(int(process.pid))
         except Exception as e:
             if 'Only one usage of each socket address' in str(e) \

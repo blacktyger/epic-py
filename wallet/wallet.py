@@ -1,3 +1,4 @@
+import datetime
 import shutil
 import time
 
@@ -16,7 +17,7 @@ class Wallet:
     config: models.Config
     settings: models.Settings
     accounts: list[models.Account] = []
-    cached_balance: models.Balance
+    _cached_balance: models.Balance = None
     api_http_server: HttpServer
 
     @return_to_cwd
@@ -40,10 +41,10 @@ class Wallet:
         shutil.copy(source_full_path, self.config.wallet_data_directory)
         os.chdir(self.config.wallet_data_directory)
 
-        # Build full wallet init command
+        # Build full wallet init command string
         args = f"./{self.config.binary_name} -r {self.config.node_address} -p {self.config.password} init -h"
 
-        # Create new wallet and its init data
+        # Execute that command to create new wallet and its initialize data
         subprocess.Popen(args.split(' ')).wait()
 
         # Load created by wallet settings file to WalletTOML model
@@ -66,42 +67,46 @@ class Wallet:
         secrets.set(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
         self.config.password = f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"
         self.config.to_toml()
-        self.config = self.config.from_toml('config.toml')
+
         # Use HTTP API (owner and foreign) as context manager,
         # api calls are encrypted with token created only for current session
         with self.api_http_server as provider:
-
             # Get wallet accounts (usually just one, 'default') and load to the Account object
             for i, acc in enumerate(provider.accounts()):
                 self.accounts.append(models.Account(id=i, **acc))
             print(self.accounts)
 
-            # Get wallet balances
-            self.cached_balance = models.Balance(**provider.retrieve_summary_info())
-            print(self.cached_balance)
+        # Get wallet balances
+        self._cached_balance = self.get_balance()
 
         return self
 
     @return_to_cwd
     def get_version(self):
         os.chdir(self.config.wallet_data_directory)
-        version = subprocess.check_output(['./epic-wallet',  '--version'])
+        version = subprocess.check_output([f"./{self.config.binary_name}",  '--version'])
         version = version.decode().strip('\n').split(' ')[-1]
         return version
 
-    def get_balance(self):
-        self.open()
-        balance = self.retrieve_summary_info()
-        self.close()
-        return balance
+    def get_balance(self, cached_time_tolerance: int = 10):
+        delta = datetime.datetime.now() + datetime.timedelta(seconds=cached_time_tolerance)
 
-    def is_balance_enough(self, amount: float | str | int):
+        # If latest cached balance is older than given
+        # tolerance (in seconds) refresh it from the node
+        if not self._cached_balance or self._cached_balance.timestamp > delta:
+            with self.api_http_server as provider:
+                self._cached_balance = models.Balance(**provider.retrieve_summary_info())
+
+        return self._cached_balance
+
+    def is_balance_enough(self, amount: float | str | int, fee: float = None):
         balance = self.get_balance()
-        fee = 0.008
-        if float(balance['amount_currently_spendable']) > (float(amount) + fee):
-            return balance
+        if not fee: fee = 0.008
+
+        if balance.currently_spendable > (amount + fee):
+            return True, balance
         else:
-            return None
+            return False, balance
 
     def send_transaction(self, method: str, amount: Union[float, int],
                          address: str, **kwargs):
