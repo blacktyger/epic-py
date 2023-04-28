@@ -1,13 +1,13 @@
 import datetime
+import threading
 import uuid
+import sys
 
 from pydantic import BaseModel, Field
 import tomlkit
 import psutil
 
-import utils
-from utils import *
-from utils import secrets
+from ..utils import *
 
 
 class Account(BaseModel):
@@ -23,7 +23,7 @@ class Balance(BaseModel):
     amount_awaiting_confirmation: float
     amount_awaiting_finalization: float
     amount_currently_spendable: float
-    last_confirmed_height: float
+    last_confirmed_height: int
     minimum_confirmations: float
     amount_immature: float
     amount_locked: float
@@ -174,7 +174,7 @@ class Listener:
         self.config: Config = config
         self.method: str = method
 
-    @utils.return_to_cwd
+    @return_to_cwd
     def run(self, **kwargs):
         flags = None
         password = secrets.get(self.config.password)
@@ -234,8 +234,19 @@ class Listener:
 
         try:
             os.chdir(self.config.wallet_data_directory)
-            process = subprocess.Popen(arguments.split(' '), text=True, start_new_session=True)
+            process = subprocess.Popen(arguments.split(' '),
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT,
+                                       text=True)
+
+            if self.method == 'epicbox':
+                callback = kwargs['callback']
+                updater = threading.Thread(target=self._log_updater, args=(process, callback))
+                # updater.daemon = True
+                updater.start()
+
             logger.info(f">> {self.method} listener started [PID: {process.pid}]..")
+
             self.process = psutil.Process(int(process.pid))
         except Exception as e:
             if 'Only one usage of each socket address' in str(e) \
@@ -246,13 +257,55 @@ class Listener:
 
         return self
 
+    def _log_updater(self, process, callback):
+        """Run extra thread to keep monitoring process output, and parse important feedback"""
+        def parse_(line):
+            return ' '.join(line.strip('\n').split(' ')[3:])
+
+        print(f">> Start updating monitor process..")
+        while True:
+            # for i in range(2):
+                line = process.stdout.readline()
+
+                if 'Broken pipe' in line:
+                    logger.error(line)
+
+                if line:
+                    callback(line=parse_(line), listener=self)
+                    # # Parse epicbox listener stdout and match different cases
+                    # if any((match in line for match in
+                    #        # Just log the stdout
+                    #        ["Connecting to the epicbox server",  # show epicbox node connection
+                    #         "Starting epicbox listener",  # show epicbox address
+                    #         "Received new transaction",  # new transaction received as recipient
+                    #         "api: post_tx: successfully posted tx"]),  # successful finished the transaction
+                    #        ):
+                    #     print(parse_(line))
+                    #
+                    # if any((match in line for match in
+                    #        # Trigger transaction status updater
+                    #        ["received back from",  # received response slate
+                    #         "finalized successfully",  # transaction sent successfully
+                    #         "Starting to send slate with id",  # response slate for to the sender
+                    #         ])):
+                    #     callback(line=parse_(line), listener=self)
+                    #     print(parse_(line))
+                    #
+                    # if 'error' in line.lower():
+                    #     print(parse_(line))
+                    #     callback(line=parse_(line), listener=self)
+
+                # time.sleep(0.2)
+
     def __repr__(self):
         return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"
 
     def stop(self):
         if self.process:
-            try: self.process.kill()
-            except Exception as e: logger.warning(e)
+            try:
+                self.process.kill()
+            except Exception as e:
+                logger.warning(e)
 
             self.process = None
             logger.info(f"'{self.method}' listener closed")
@@ -284,4 +337,3 @@ class EpicBoxConfig(BaseModel):
 
     def __str__(self):
         return f"EpicBox({self.address})"
-

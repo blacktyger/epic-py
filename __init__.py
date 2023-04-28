@@ -1,1 +1,1 @@
-from .wallet import Wallet
+from .wallet.wallet import Wallet

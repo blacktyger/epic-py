@@ -22,8 +22,9 @@ def benchmark(func):
         start = time.time()
         result = func(*args, **kwargs)
         stop = time.time()
-        logger.warning(f">> BENCHMARK: {func.__name__} took {(stop-start):.4f} seconds")
+        logger.warning(f">> BENCHMARK: {func.__name__} took {(stop - start):.4f} seconds")
         return result
+
     return wrapper
 
 
@@ -34,12 +35,18 @@ def return_to_cwd(func):
         result = func(*args, **kwargs)
         os.chdir(cwd)
         return result
+
     return wrapper
 
 
 def response(error: bool = False, message: str = 'success',
              result: Any = None) -> dict:
     return {'error': error, 'message': message, 'result': result}
+
+
+def parse_uuid(string: str):
+    uuid_extract_pattern = "[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}"
+    return re.findall(uuid_extract_pattern, string)
 
 
 def find_process_by_port(port: int):
@@ -79,8 +86,8 @@ def get_tx_slate_id(slate: str) -> str | None:
         else:
             dashes = False
     try:
-        extract = slate.split('tx_slate_id')[1].\
-            split('":"')[1].\
+        extract = slate.split('tx_slate_id')[1]. \
+            split('":"')[1]. \
             split('"')[0]
 
         match = re.findall(pattern, extract)

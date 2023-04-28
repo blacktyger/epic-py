@@ -8,7 +8,7 @@ from coincurve import PublicKey, PrivateKey
 from Crypto.Cipher import AES
 import requests
 
-import utils
+from .. import utils
 from . import models
 
 class HttpServer:
@@ -76,6 +76,7 @@ class HttpServer:
     def __enter__(self):
         try:
             self._run_server(method="owner_api")
+            time.sleep(1)
             self._init_secure_api()
             return self._open_wallet()
 
@@ -83,7 +84,7 @@ class HttpServer:
             utils.logger.error(f"{e}")
 
     def __exit__(self, *args):
-        self._close_wallet()
+        pass
 
     def _init_secure_api(self) -> None:
         """
@@ -123,52 +124,42 @@ class HttpServer:
 
         return self
 
-    def _run_server(self, method: str):
+    def _run_server(self, method: str, callback=None):
         """
-        Run owner listener (local HTTP API server) to access wallet functions
+        Run listener process
         """
         listener = models.Listener(settings=self.settings, config=self.config, method=method)
-        self.listeners.append(listener.run(force_run=True))
+        self.listeners.append(listener.run(force_run=True, callback=callback))
         time.sleep(1)
         return self.listeners[-1]
 
     def _close_wallet(self):
         self.close()
         for listener in self.listeners:
-            listener.stop()
+            if listener.method != "epicbox":
+                listener.stop()
 
-    def _send_via_http(self, amount: Union[float, int], address: str, **kwargs):
+    def send_via_epicbox(self, amount: Union[float, int], address: str, **kwargs):
         # Prepare transaction slate with partial data
         print('>> preparing transaction (init_send_tx)')
-        transaction = self._prepare_slate(amount, **kwargs)
-        address = f'{address}/{self.foreign_api_version}/foreign'
-        tx = self.init_send_tx(transaction)
 
-        # Lock sender's outputs for transaction
-        print('>> locking funds (lock_outputs)')
-        self.tx_lock_outputs(tx)
+        kwargs["send_args"] = {
+            "method": "epicbox",
+            "dest": address,
+            "finalize": True,
+            "post_tx": True,
+            "fluff": False
+            }
+
+        init_slate = self._prepare_slate(amount, **kwargs)
 
         try:
-            # Connect to receiver's foreign api wallet and send transaction slate
-            print('>> sending slate to receiver (receive_tx)')
-            response_tx = self.send_to_receiver_via_http(address, tx)
-
-            # Validate receiver's transaction response slate
-            print('>> validate receiver response (finalize)')
-            finalize = self.finalize_tx(response_tx)
-
-            # Send transaction to network using connected node
-            print('>> sending tx to network (post_tx)')
-            post_tx = self.post_tx(finalize['tx'])
-
-            if post_tx:
-                print(f'>> transaction sent successfully')
-                return finalize
+            transaction = self.init_send_tx(init_slate)
+            return transaction
 
         except Exception as e:
             print(e)
-            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=tx['id']))
-            return
+            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=init_slate['id']))
 
     def node_height(self):
         """Get block height from connected node"""
@@ -466,6 +457,39 @@ class HttpServer:
 
         return args
 
+    def _send_via_http(self, amount: Union[float, int], address: str, **kwargs):
+        # Prepare transaction slate with partial data
+        print('>> preparing transaction (init_send_tx)')
+        transaction = self._prepare_slate(amount, **kwargs)
+        address = f'{address}/{self.foreign_api_version}/foreign'
+        tx = self.init_send_tx(transaction)
+
+        # Lock sender's outputs for transaction
+        print('>> locking funds (lock_outputs)')
+        self.tx_lock_outputs(tx)
+
+        try:
+            # Connect to receiver's foreign api wallet and send transaction slate
+            print('>> sending slate to receiver (receive_tx)')
+            response_tx = self.send_to_receiver_via_http(address, tx)
+
+            # Validate receiver's transaction response slate
+            print('>> validate receiver response (finalize)')
+            finalize = self.finalize_tx(response_tx)
+
+            # Send transaction to network using connected node
+            print('>> sending tx to network (post_tx)')
+            post_tx = self.post_tx(finalize['tx'])
+
+            if post_tx:
+                print(f'>> transaction sent successfully')
+                return finalize
+
+        except Exception as e:
+            print(e)
+            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=tx['id']))
+            return
+
     @staticmethod
     def send_to_receiver_via_http(receiver_address: str, transaction: dict):
         """
@@ -539,7 +563,7 @@ class HttpServer:
         return plaintext.decode()
 
     def _api_call(self, method: str, params: dict, api: str = 'owner'):
-        """ Execute api call
+        """
         :param method: api call method name
         :param params: dict with api_call params
         :params api: str, type of api (foreign or owner)
