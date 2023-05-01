@@ -1,7 +1,6 @@
-import datetime
 import threading
+import datetime
 import uuid
-import sys
 
 from pydantic import BaseModel, Field
 import tomlkit
@@ -241,8 +240,9 @@ class Listener:
 
             if self.method == 'epicbox':
                 callback = kwargs['callback']
-                updater = threading.Thread(target=self._log_updater, args=(process, callback))
-                # updater.daemon = True
+                updater = threading.Thread(target=self.log_monitor, args=(process, callback))
+                updater.daemon = True
+                logger.debug(f">> Start epicbox listener log monitor")
                 updater.start()
 
             logger.info(f">> {self.method} listener started [PID: {process.pid}]..")
@@ -257,45 +257,16 @@ class Listener:
 
         return self
 
-    def _log_updater(self, process, callback):
+    @staticmethod
+    def log_monitor(process, callback):
         """Run extra thread to keep monitoring process output, and parse important feedback"""
-        def parse_(line):
-            return ' '.join(line.strip('\n').split(' ')[3:])
-
-        print(f">> Start updating monitor process..")
         while True:
-            # for i in range(2):
-                line = process.stdout.readline()
+            line = process.stdout.readline()
 
-                if 'Broken pipe' in line:
-                    logger.error(line)
-
-                if line:
-                    callback(line=parse_(line), listener=self)
-                    # # Parse epicbox listener stdout and match different cases
-                    # if any((match in line for match in
-                    #        # Just log the stdout
-                    #        ["Connecting to the epicbox server",  # show epicbox node connection
-                    #         "Starting epicbox listener",  # show epicbox address
-                    #         "Received new transaction",  # new transaction received as recipient
-                    #         "api: post_tx: successfully posted tx"]),  # successful finished the transaction
-                    #        ):
-                    #     print(parse_(line))
-                    #
-                    # if any((match in line for match in
-                    #        # Trigger transaction status updater
-                    #        ["received back from",  # received response slate
-                    #         "finalized successfully",  # transaction sent successfully
-                    #         "Starting to send slate with id",  # response slate for to the sender
-                    #         ])):
-                    #     callback(line=parse_(line), listener=self)
-                    #     print(parse_(line))
-                    #
-                    # if 'error' in line.lower():
-                    #     print(parse_(line))
-                    #     callback(line=parse_(line), listener=self)
-
-                # time.sleep(0.2)
+            if 'Broken pipe' in line:
+                logger.error(line)
+            elif line:
+                callback(' '.join(line.strip('\n').split(' ')[3:]))
 
     def __repr__(self):
         return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"

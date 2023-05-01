@@ -1,6 +1,7 @@
 import datetime
 import decimal
 import shutil
+import signal
 import time
 
 from .http import HttpServer
@@ -105,7 +106,18 @@ class Wallet:
 
         return self
 
-    def run_epicbox(self, callback=None):
+    def run_epicbox(self, callback=None, force_run=False):
+        already_running = find_process_by_name('method epicbox')
+
+        if already_running:
+            logger.critical(f"Epicbox listener already running, PID: {already_running}")
+
+            if force_run:
+                os.kill(already_running[0], signal.SIGKILL)
+                logger.debug(f"Epicbox listener process closed")
+            else:
+                return
+
         with self.api_http_server as provider:
             provider._run_server(method="epicbox", callback=callback)
 

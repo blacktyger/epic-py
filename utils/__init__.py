@@ -8,9 +8,9 @@ import re
 from killport import get_processes
 import requests
 
+from . import secret_manager as secrets
 from .logger_ import get_logger
 from .errors import NodeError
-from . import secret_manager as secrets
 from . import defaults
 
 logger = get_logger()
@@ -56,6 +56,13 @@ def find_process_by_port(port: int):
         return result[0].process.pid
     else:
         return None
+
+
+def find_process_by_name(name):
+    """Return process ids found by (partial) name or regex."""
+    child = subprocess.Popen(['pgrep', '-f', name], stdout=subprocess.PIPE, shell=False)
+    response = child.communicate()[0]
+    return [int(pid) for pid in response.split()]
 
 
 def get_tx_slate_id(slate: str) -> str | None:
