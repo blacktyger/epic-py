@@ -445,7 +445,7 @@ class HttpServer:
             "max_outputs": 500,
             "num_change_outputs": 1,
             "selection_strategy_is_use_all": False,
-            "message": "a",
+            "message": "From Giver Of Epic with love!",
             "target_slate_version": None,
             "payment_proof_recipient_address": None,
             "ttl_blocks": None,
