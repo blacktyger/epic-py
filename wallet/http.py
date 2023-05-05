@@ -84,7 +84,8 @@ class HttpServer:
             utils.logger.error(f"{e}")
 
     def __exit__(self, *args):
-        pass
+        time.sleep(1)
+        self._close_wallet()
 
     def _init_secure_api(self) -> None:
         """

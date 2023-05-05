@@ -2,7 +2,6 @@ import datetime
 import decimal
 import shutil
 import signal
-import time
 
 from .http import HttpServer
 from . import models
@@ -11,10 +10,7 @@ from ..utils import *
 
 class Wallet:
     """
-    Main class to manage Epic-Cash cli wallet through different methods
-    :param wallet_dir: str, REQUIRED,  path to the top level wallet directory
-           default '~/.epic/main/' or '%USERPROFILE%/.epic/main/'. Wallet will
-           look for `wallet_data` dir with `wallet.seed` file inside
+    Main class to manage EPIC Wallet through different methods
     """
     config: models.Config
     settings: models.Settings
@@ -22,6 +18,9 @@ class Wallet:
     _cached_balance: models.Balance = None
     api_http_server: HttpServer
     state: object = None
+
+    def __init__(self, path: str = None):
+        if path: self.load_from_path(path)
 
     @return_to_cwd
     @benchmark
@@ -34,7 +33,6 @@ class Wallet:
 
         self.config = models.Config(**kwargs)
         source_full_path = os.path.join(self.config.binary_path, self.config.binary_name)
-        # source_full_path = f"{self.config.binary_path}/{self.config.binary_name}"
 
         # Make sure source wallet-cli file exists
         if not os.path.isfile(source_full_path):
@@ -92,17 +90,6 @@ class Wallet:
         settings_file = f"{os.path.join(self.config.wallet_data_directory, self.config.binary_name)}.toml"
         self.settings = models.Settings(file_path=settings_file)
         self.api_http_server = HttpServer(self.settings, self.config)
-
-        return self
-
-    def load_from_state(self):
-        # Load created by wallet settings file to WalletTOML model
-        file = os.path.join(self.state.wallet_dir, "config.toml")
-        self.config = models.Config.from_toml(file)
-        settings_file = f"{os.path.join(self.config.wallet_data_directory, self.config.binary_name)}.toml"
-        self.settings = models.Settings(file_path=settings_file)
-        self.api_http_server = HttpServer(self.settings, self.config)
-        logger.info("Wallet loaded successfully.")
 
         return self
 
