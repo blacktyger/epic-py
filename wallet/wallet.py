@@ -1,11 +1,13 @@
+import subprocess
 import datetime
 import decimal
 import shutil
 import signal
+import os
 
 from .http import HttpServer
 from . import models
-from ..utils import *
+from .. import utils
 
 
 class Wallet:
@@ -19,11 +21,16 @@ class Wallet:
     api_http_server: HttpServer
     state: object = None
 
-    def __init__(self, path: str = None):
-        if path: self.load_from_path(path)
+    def __init__(self, path: str = None, logger=None):
+        if logger is None:
+            logger = utils.logger
 
-    @return_to_cwd
-    @benchmark
+        self.logger = logger
+        if path:
+            self.load_from_path(path)
+
+    @utils.return_to_cwd
+    @utils.benchmark
     def create_new(self, **kwargs):
         # Make sure all the required arguments are provided
         REQUIRED = ('binary_path', 'password')
@@ -66,8 +73,8 @@ class Wallet:
             self.settings.set(category='logging', key='file_log_level', value="DEBUG")
 
         # Save password to secure storage with pass manager and store only reference to it
-        secrets.set(f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
-        self.config.password = f"{defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"
+        utils.secrets.set(f"{utils.defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
+        self.config.password = f"{utils.defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"
         self.config.to_toml()
 
         # Use HTTP API (owner and foreign) as context manager,
@@ -94,21 +101,21 @@ class Wallet:
         return self
 
     def run_epicbox(self, callback=None, force_run=False):
-        already_running = find_process_by_name('method epicbox')
+        already_running = utils.find_process_by_name('method epicbox')
 
         if already_running:
-            logger.critical(f"Epicbox listener already running, PID: {already_running}")
+            self.logger.critical(f"Epicbox listener already running, PID: {already_running}")
 
             if force_run:
                 os.kill(already_running[0], signal.SIGKILL)
-                logger.debug(f"Epicbox listener process closed")
+                self.logger.debug(f"Epicbox listener process closed")
             else:
                 return
 
         with self.api_http_server as provider:
             provider._run_server(method="epicbox", callback=callback)
 
-    @return_to_cwd
+    @utils.return_to_cwd
     def get_version(self):
         os.chdir(self.config.wallet_data_directory)
         version = subprocess.check_output([f"./{self.config.binary_name}", '--version'])
@@ -138,8 +145,7 @@ class Wallet:
         else:
             return False, balance
 
-    def send_transaction(self, method: str, amount: Union[float, int],
-                         address: str, **kwargs):
+    def send_transaction(self, method: str, amount: float | int, address: str, **kwargs):
         """
         Helper function to organize sending workflow
         :param method: str, transaction method (http, epicbox)
@@ -149,10 +155,10 @@ class Wallet:
 
         if method == 'epicbox':
             with self.api_http_server as provider:
-                res = response(False, 'init_slate sent',
+                res = utils.response(False, 'init_slate sent',
                                provider.send_via_epicbox(address=address, amount=amount, **kwargs))
         else:
-            res = response(True, f"'{method}' method not supported, use 'http' or 'epicbox'")
+            res = utils.response(True, f"'{method}' method not supported, use 'http' or 'epicbox'")
 
         return res
 
