@@ -1,6 +1,5 @@
 import subprocess
 import os
-from typing import Union
 
 import psutil
 
@@ -23,10 +22,10 @@ class CLIHandler:
         :param binary_path: string with path to epic binary
         :param settings_path: string with path to server settings
         """
-        self.process: Union[None, psutil.Process] = None
+        self.process: None | psutil.Process = None
         self.is_running = self._is_node_running()
 
-        self.settings: Union[utils.TOMLConfig, None] = None
+        self.settings: utils.TOMLConfig | None = None
         self.binary_path = binary_path
 
         cwd_ = os.path.split(os.path.abspath(binary_path))[0]

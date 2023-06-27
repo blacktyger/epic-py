@@ -1,5 +1,3 @@
-from typing import Union
-
 import requests
 
 from .. import utils
@@ -23,7 +21,7 @@ class HTTPHandler:
         self.call_type: str = ''
         self.url = url
 
-    def api_call(self, method: str, params: Union[list, dict]) -> dict:
+    def api_call(self, method: str, params: list | dict) -> dict:
         """ Prepare and execute POST request to Node API
         :param method: string, api call method
         :param params: dictionary, params for POST request

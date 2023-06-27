@@ -1,8 +1,8 @@
 import os
 
 from ..utils.defaults import Node as defaults
-from .node_cli import CLIHandler
 from .node_http import HTTPHandler
+from .node_cli import CLIHandler
 from ..utils import logger
 from .. import utils
 
@@ -14,7 +14,7 @@ class ServerNode(HTTPHandler, CLIHandler):
     """
     binary_name = defaults.binary_name
     http_api_version = 'v2'
-    supported_versions = ['3.0.0']
+    supported_versions = ['3.4.0']
 
     def __init__(self,
                  access: str = 'local',
@@ -80,11 +80,15 @@ class ServerNode(HTTPHandler, CLIHandler):
             CLIHandler.__init__(self, binary_path, settings_path)
 
             # Try to get values from settings
-            if api_url: self.api_url = api_url
-            else: self.api_url = self.settings.get(category='server', sub_category='', key='api_http_addr')
+            if api_url:
+                self.api_url = api_url
+            else:
+                self.api_url = self.settings.get(category='server', sub_category='', key='api_http_addr')
 
-            if api_secret: self.auth_pass = api_secret
-            else: self.auth_pass = self.settings.get(category='server', sub_category='', key='api_secret_path')
+            if api_secret:
+                self.auth_pass = api_secret
+            else:
+                self.auth_pass = self.settings.get(category='server', sub_category='', key='api_secret_path')
 
             # If settings not provided use default values
             if not self.api_url:
@@ -101,8 +105,10 @@ class ServerNode(HTTPHandler, CLIHandler):
                 logger.info(f"Provided 'api_url' is not a valid server API url, will try default instead")
                 self.api_url = defaults.api_http_addr
 
-            if api_secret: self.auth_pass = api_secret
-            else: self.auth_pass = defaults.api_secret_path
+            if api_secret:
+                self.auth_pass = api_secret
+            else:
+                self.auth_pass = defaults.api_secret_path
 
             HTTPHandler.__init__(self, url=self.api_url, auth_user='epic',
                                  auth_pass=utils.parse_secret(self.auth_pass))
@@ -220,6 +226,7 @@ class ServerNode(HTTPHandler, CLIHandler):
 
     def get_url(self):
         return self._url()
+
 
 """
 ## Possible Node() class types:
