@@ -1,8 +1,10 @@
+import logging
 import os
 
 import gnupg
 import passpy
 
+logging.getLogger('gnupg').setLevel(60)
 
 """
 BEFORE USING THIS SCRIPT:

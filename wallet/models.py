@@ -129,18 +129,44 @@ class Settings(BaseModel):
         self._save_to_file()
 
 
+class EpicBoxConfig(BaseModel):
+    address: str | None = Field(default='')
+    prefix: str | None = Field('epicbox')
+    domain: str | None = Field(default=utils.defaults.EPICBOX_NODE)
+    index: int | None = Field(default=0)
+    port: str | None = Field(default=utils.defaults.EPICBOX_PORT)
+    full_address: str | None
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+        self.init_config()
+
+    def init_config(self):
+        _full_address = f"{self.address}@{self.prefix}.{self.domain}"
+
+        if self.port:
+            _full_address = f"{_full_address}:{self.port}"
+
+        self.full_address = _full_address
+
+    def get_short_address(self):
+        return f"{self.address[0:4]}...{self.address[-4:]}"
+
+    def __str__(self):
+        return f"EpicBox({self.address})"
+
+
 class Config(BaseModel):
     id: str = str(uuid.uuid4())
     name: str = f'wallet_{id}'
-    debug: bool = True,
     network: str = 'mainnet'
-    password: str = None
-    binary_path: str = None
+    epicbox: EpicBoxConfig = None
+    password: str = ''
     description: str = ''
-    binary_name: str = 'epic-wallet'
-    node_address: str = None
-    epicbox_address: str = None
-    wallet_data_directory: str = None
+    node_address: str = ''
+    epicbox_address: str = ''
+    binary_file_path: str = ''
+    wallet_data_directory: str = ''
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -161,7 +187,10 @@ class Config(BaseModel):
 
         with open(file, "w+") as f:
             f.write(file_info)
-            tomlkit.dump(self.dict(exclude={'binary_path', 'debug'}), f)
+            cfg_ = self.dict(exclude={'epicbox'})
+            if self.epicbox:
+                cfg_['epicbox_address'] = self.epicbox.full_address
+            tomlkit.dump(cfg_, f)
 
     @staticmethod
     def from_toml(file: str):
@@ -181,7 +210,6 @@ class Listener:
         self.config: Config = config
         self.method: str = method
 
-    @utils.return_to_cwd
     def run(self, **kwargs):
         flags = None
         password = utils.secrets.get(self.config.password)
@@ -189,7 +217,7 @@ class Listener:
         method_flag = f'--method {self.method}'
         listen_port = None
 
-        arguments = f"./{self.config.binary_name} -p {password}"
+        arguments = f"{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory}"
 
         match self.method:
             case 'http':
@@ -202,16 +230,14 @@ class Listener:
             case 'epicbox':
                 command = 'listen'
                 flags = method_flag
-
-                if 'interval' in kwargs:
-                    interval = kwargs['interval']
-                    flags += f" --interval {interval}"
             case _:
                 self.logger.error(f'"{self.method}" is not a valid listening method')
                 return
 
         arguments += f" {command}"
-        if flags: arguments += f" {flags}"
+
+        if flags:
+            arguments += f" {flags}"
 
         if listen_port:
             listen_port = self.settings.get(category='wallet', key=listen_port)
@@ -232,30 +258,26 @@ class Listener:
                 self.logger.info(f"{self.method} listener already running [PID: {self.process.pid}]..")
                 return self
             else:
-                self.logger.warning(f"{self.method} listener process is not None, "
-                               f"but not running in system: {self.process}")
+                self.logger.warning(f"{self.method} listener process is not None, but not running in system: {self.process}")
 
         elif not self.settings or not self.config:
             self.logger.warning(f"wallet config not provided")
             return
 
         try:
-            os.chdir(self.config.wallet_data_directory)
             process = subprocess.Popen(arguments.split(' '), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
             if self.method == 'epicbox':
-                callback = kwargs['callback']
-                updater = threading.Thread(target=self.log_monitor, args=(process, callback))
+                updater = threading.Thread(target=self.log_monitor, args=(process, kwargs['callback']))
                 updater.daemon = True
-                self.logger.debug(f">> Start epicbox listener log monitor")
+                self.logger.debug(f">> Starting epicbox listener log monitor..")
                 updater.start()
 
             self.logger.info(f">> {self.method} listener started [PID: {process.pid}]..")
 
             self.process = psutil.Process(int(process.pid))
         except Exception as e:
-            if 'Only one usage of each socket address' in str(e) \
-                or 'Address already in use' in str(e):
+            if 'Only one usage of each socket address' in str(e) or 'Address already in use' in str(e):
                 self.logger.warning(f">> other {self.method} listener already running?")
             else:
                 self.logger.error(f"\n\n{str(e)}\n\n")
@@ -285,31 +307,3 @@ class Listener:
 
             self.process = None
             self.logger.info(f"'{self.method}' listener closed")
-        else:
-            self.logger.warning(f"'{self.method}' listener wasn't working")
-
-
-class EpicBoxConfig(BaseModel):
-    address: str | None = Field(default='')
-    prefix: str | None = Field('epicbox')
-    domain: str | None = Field(default=utils.defaults.EPICBOX_NODE)
-    port: str | None = Field(default=utils.defaults.EPICBOX_PORT)
-    full_address: str | None
-
-    def __init__(self, **data: Any):
-        super().__init__(**data)
-        self.init_config()
-
-    def init_config(self):
-        _full_address = f"{self.address}@{self.prefix}.{self.domain}"
-
-        if self.port:
-            _full_address = f"{_full_address}:{self.port}"
-
-        self.full_address = _full_address
-
-    def get_short_address(self):
-        return f"{self.address[0:4]}...{self.address[-4:]}"
-
-    def __str__(self):
-        return f"EpicBox({self.address})"

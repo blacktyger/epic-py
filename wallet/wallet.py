@@ -1,13 +1,14 @@
 import subprocess
 import datetime
 import decimal
-import shutil
 import signal
 import os
 
+from .models import EpicBoxConfig
 from .http import HttpServer
 from . import models
 from .. import utils
+from ..utils import defaults
 
 
 class Wallet:
@@ -29,35 +30,39 @@ class Wallet:
         if path:
             self.load_from_path(path)
 
-    @utils.return_to_cwd
     @utils.benchmark
     def create_new(self, **kwargs):
         # Make sure all the required arguments are provided
-        REQUIRED = ('binary_path', 'password')
+        REQUIRED = ('binary_file_path', 'password')
 
         if not all(arg in kwargs for arg in REQUIRED):
             raise SystemExit(f'Missing required argument/s, provide all: {REQUIRED}') from None
 
-        self.config = models.Config(**kwargs)
-        source_full_path = os.path.join(self.config.binary_path, self.config.binary_name)
+        # Get models.Config fields from kwargs
+        config_ = dict()
 
-        # Make sure source wallet-cli file exists
-        if not os.path.isfile(source_full_path):
-            raise SystemExit(f'Invalid wallet-cli {source_full_path} binary file path') from None
+        for k, v in kwargs.items():
+            if k in models.Config.__fields__.keys():
+                config_[k] = v
 
-        # Create new top_dir wallet directory and copy source binary there
+        self.config = models.Config(**config_)
+
+        # Make sure binary wallet-cli file exists
+        if not os.path.isfile(self.config.binary_file_path):
+            raise SystemExit(f'Invalid wallet-cli {self.config.binary_file_path} binary file path') from None
+
+        # Create new top_dir wallet directory
         os.makedirs(self.config.wallet_data_directory, exist_ok=True)
-        shutil.copy(source_full_path, self.config.wallet_data_directory)
-        os.chdir(self.config.wallet_data_directory)
 
         # Build full wallet init command string
-        args = f"./{self.config.binary_name} -r {self.config.node_address} -p {self.config.password} init -h"
+        args = f"{self.config.binary_file_path} -r {self.config.node_address} -p {self.config.password} " \
+               f"-t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} init"
 
         # Execute that command to create new wallet and its initialize data
         subprocess.Popen(args.split(' ')).wait()
 
         # Load created by wallet settings file to WalletTOML model
-        settings_file = f"{os.path.join(self.config.wallet_data_directory, self.config.binary_name)}.toml"
+        settings_file = f"{os.path.join(self.config.wallet_data_directory, defaults.BINARY_NAME)}.toml"
         self.settings = models.Settings(file_path=settings_file)
         self.api_http_server = HttpServer(self.settings, self.config)
 
@@ -65,8 +70,8 @@ class Wallet:
         if self.config.node_address:
             self.settings.set(category='wallet', key='check_node_api_http_addr', value=self.config.node_address)
 
-        if self.config.epicbox_address:
-            self.settings.set(category='epicbox', key='epicbox_domain', value=self.config.epicbox_address)
+        if 'epicbox_domain' in kwargs:
+            self.settings.set(category='epicbox', key='epicbox_domain', value=kwargs['epicbox_domain'])
 
         if 'debug' in kwargs and kwargs['debug']:
             self.settings.set(category='logging', key='stdout_log_level', value="DEBUG")
@@ -83,18 +88,20 @@ class Wallet:
             # Get wallet accounts (usually just one, 'default') and load to the Account object
             for i, acc in enumerate(provider.accounts()):
                 self.accounts.append(models.Account(id=i, **acc))
-            print(self.accounts)
 
-        # Get wallet balances
-        self._cached_balance = self.get_balance()
+            # Get the epic-box address
+            public_key = provider.get_public_address()['public_key']
+            self.config.epicbox = EpicBoxConfig(address=public_key, domain=self.settings.epicbox['epicbox_domain'],
+                                     index=self.settings.epicbox['epicbox_address_index'], port=self.settings.epicbox['epicbox_port'])
+            self.config.to_toml()
 
         return self
 
     def load_from_path(self, path: str):
         # Load created by wallet settings file to WalletTOML model
-        file = os.path.join(path, "config.toml")
-        self.config = models.Config.from_toml(file)
-        settings_file = f"{os.path.join(self.config.wallet_data_directory, self.config.binary_name)}.toml"
+        config_file = os.path.join(path, "config.toml")
+        self.config = models.Config.from_toml(config_file)
+        settings_file = f"{os.path.join(self.config.wallet_data_directory, defaults.BINARY_NAME)}.toml"
         self.settings = models.Settings(file_path=settings_file)
         self.api_http_server = HttpServer(self.settings, self.config)
 
@@ -115,10 +122,8 @@ class Wallet:
         with self.api_http_server as provider:
             provider._run_server(method="epicbox", callback=callback)
 
-    @utils.return_to_cwd
     def get_version(self):
-        os.chdir(self.config.wallet_data_directory)
-        version = subprocess.check_output([f"./{self.config.binary_name}", '--version'])
+        version = subprocess.check_output([f"{self.config.binary_file_path}", '--version'])
         version = version.decode().strip('\n').split(' ')[-1]
         return version
 
@@ -155,8 +160,7 @@ class Wallet:
 
         if method == 'epicbox':
             with self.api_http_server as provider:
-                res = utils.response(False, 'init_slate sent',
-                               provider.send_via_epicbox(address=address, amount=amount, **kwargs))
+                res = utils.response(False, 'init_slate sent', provider.send_via_epicbox(address=address, amount=amount, **kwargs))
         else:
             res = utils.response(True, f"'{method}' method not supported, use 'http' or 'epicbox'")
 

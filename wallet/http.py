@@ -120,6 +120,7 @@ class HttpServer:
         params = {
             'name': 'default',
             'password': utils.secrets.get(self.config.password),
+            # 'password': self.config.password,
             }
         self._token = self._secure_api_call('open_wallet', params)
 
@@ -306,6 +307,14 @@ class HttpServer:
         resp = self._secure_api_call('accounts', params)
         return resp
 
+    def get_public_address(self, index: int = 0):
+        params = {
+            'token': self._token,
+            "derivation_index": index
+            }
+        resp = self._secure_api_call('get_public_address', params)
+        return resp
+
     def change_password(self, old, new, name):
         params = {
             'name': name,
@@ -351,7 +360,10 @@ class HttpServer:
         self._secure_api_call('delete_wallet', params)
         return True
 
-    def get_mnemonic(self, password: str, name: str = None):
+    def get_mnemonic(self, password: str = None, name: str = None):
+        if password is None:
+            password = utils.secret_manager.get(self.config.password)
+
         params = {
             'name': name,
             'password': password,
