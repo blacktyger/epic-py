@@ -1,9 +1,9 @@
-import os
+from typing import Any
 import subprocess
 import threading
 import datetime
 import uuid
-from typing import Any
+import os
 
 from pydantic import BaseModel, Field
 import tomlkit
@@ -142,7 +142,7 @@ class EpicBoxConfig(BaseModel):
         self.init_config()
 
     def init_config(self):
-        _full_address = f"{self.address}@{self.prefix}.{self.domain}"
+        _full_address = f"{self.address}@{self.domain}"
 
         if self.port:
             _full_address = f"{_full_address}:{self.port}"
@@ -166,6 +166,7 @@ class Config(BaseModel):
     node_address: str = ''
     epicbox_address: str = ''
     binary_file_path: str = ''
+    tx_files_directory: str = '.'
     wallet_data_directory: str = ''
 
     def __init__(self, **kwargs):
@@ -287,13 +288,16 @@ class Listener:
     @classmethod
     def log_monitor(cls, process, callback):
         """Run extra thread to keep monitoring process output, and parse important feedback"""
+        callback(text='started epicbox listener')
+
         while True:
             line = process.stdout.readline()
 
             if 'Broken pipe' in line:
                 cls.logger.error(line)
             elif line:
-                callback(' '.join(line.strip('\n').split(' ')[3:]))
+                cls.logger.warning(line)
+                callback(text=' '.join(line.strip('\n').split(' ')[3:]))
 
     def __repr__(self):
         return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"

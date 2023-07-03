@@ -1,4 +1,6 @@
+from pprint import pprint
 from typing import Union
+from decimal import Decimal
 import base64
 import json
 import time
@@ -37,10 +39,11 @@ class HttpServer:
         self._encryption_key: str = ''
 
         settings_ = self.settings.wallet
-        self.foreign_api = f"http://{settings_['api_secret_path']}:{settings_['api_listen_port']}/" \
-                           f"{self.foreign_api_version}/foreign",
-        self.owner_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/" \
-                         f"{self.owner_api_version}/owner",
+        if settings_['owner_api_include_foreign']:
+            self.foreign_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/{self.foreign_api_version}/foreign",
+        else:
+            self.foreign_api = f"http://{settings_['api_listen_interface']}:{settings_['api_listen_port']}/{self.foreign_api_version}/foreign",
+        self.owner_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/{self.owner_api_version}/owner",
         self.auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
 
     def _secure_api_call(self, method: str, params: dict) -> dict:
@@ -126,11 +129,11 @@ class HttpServer:
 
         return self
 
-    def _run_server(self, method: str, callback=None):
+    def _run_server(self, method: str, callback=None, logger=None):
         """
         Run listener process
         """
-        listener = models.Listener(settings=self.settings, config=self.config, method=method)
+        listener = models.Listener(settings=self.settings, config=self.config, method=method, logger=logger)
         self.listeners.append(listener.run(force_run=True, callback=callback))
         time.sleep(1)
         return self.listeners[-1]
@@ -143,7 +146,7 @@ class HttpServer:
 
     def send_via_epicbox(self, amount: Union[float, int], address: str, **kwargs):
         # Prepare transaction slate with partial data
-        print('>> preparing transaction (init_send_tx)')
+        print('>> preparing epicbox transaction (init_send_tx)')
 
         kwargs["send_args"] = {
             "method": "epicbox",
@@ -162,6 +165,45 @@ class HttpServer:
         except Exception as e:
             print(e)
             print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=init_slate['id']))
+
+    def send_via_file(self, amount: str, **kwargs) -> str:
+        # Prepare transaction slate with partial data
+        print('>> preparing file transaction (init_send_tx)')
+
+        init_slate = self._prepare_slate(amount, **kwargs)
+        transaction = self.init_send_tx(init_slate)
+        self.tx_lock_outputs(transaction)
+
+        # Set the file name, use tx_slate_id if not provided
+        if 'file_name' in kwargs:
+            file_name = f"{kwargs['file_name']}.tx"
+        else:
+            file_name = f"{transaction['id']}.tx"
+
+        tx_file_path = os.path.join(self.config.tx_files_directory, file_name)
+
+        try:
+            with open(tx_file_path, 'w') as file:
+                file.write(json.dumps(transaction))
+
+            return tx_file_path
+
+        except Exception as e:
+            print(str(e))
+            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=init_slate['id']))
+
+    def receive_tx(self, tx_slate: dict | str, **kwargs):
+        """Receive transaction using tx_slate and return response_tx_slate"""
+        if isinstance(tx_slate, str):
+            tx_slate = json.loads(tx_slate)
+
+        params = {'slate': tx_slate, 'dest_acct_name': None, 'message': None}
+
+        for key, value in kwargs.items():
+            params[key] = value
+
+        resp = self._api_call('receive_tx', params=params, api='foreign')
+        return resp
 
     def node_height(self):
         """Get block height from connected node"""
@@ -273,14 +315,14 @@ class HttpServer:
         resp = self._secure_api_call('issue_invoice_tx', params)
         return resp
 
-    def post_tx(self, tx, fluff=False):
+    def post_tx(self, tx: dict, fluff: bool = False):
         params = {
             'token': self._token,
             'tx': tx,
             'fluff': fluff,
             }
         resp = self._secure_api_call('post_tx', params)
-        return True
+        return resp
 
     def process_invoice_tx(self, slate, args):
         params = {
@@ -436,8 +478,7 @@ class HttpServer:
         resp = self._secure_api_call('verify_payment_proof', params)
         return resp
 
-    def create_wallet(self, password: str, name: str = None,
-                      mnemonic: str = None, mnemonic_length: int = 24):
+    def create_wallet(self, password: str, name: str = None, mnemonic: str = None, mnemonic_length: int = 24):
         params = {
             'name': name,
             'password': password,
@@ -449,6 +490,11 @@ class HttpServer:
 
     @staticmethod
     def _prepare_slate(amount, **kwargs):
+        if isinstance(amount, str):
+            amount = round(float(amount), 8)
+        elif isinstance(amount, Decimal):
+            amount = round(float(amount), 8)
+
         amount = int(amount * 10**8)
 
         args = {
@@ -458,7 +504,7 @@ class HttpServer:
             "max_outputs": 500,
             "num_change_outputs": 1,
             "selection_strategy_is_use_all": False,
-            "message": "From Giver Of Epic with love!",
+            "message": "Epic transaction",
             "target_slate_version": None,
             "payment_proof_recipient_address": None,
             "ttl_blocks": None,
@@ -595,4 +641,4 @@ class HttpServer:
             response = requests.post(api_url, json=payload, auth=self.auth)
             return utils.parse_api_response(response)
         except Exception:
-            raise SystemExit(f'Connection error, is wallet owner_api running under: {api_url}?')
+            raise SystemExit(f'Connection error, is wallet api running under: {api_url}?')
