@@ -38,14 +38,6 @@ class HttpServer:
         self._secret: PrivateKey = PrivateKey(os.urandom(32))
         self._encryption_key: str = ''
 
-        settings_ = self.settings.wallet
-        if settings_['owner_api_include_foreign']:
-            self.foreign_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/{self.foreign_api_version}/foreign",
-        else:
-            self.foreign_api = f"http://{settings_['api_listen_interface']}:{settings_['api_listen_port']}/{self.foreign_api_version}/foreign",
-        self.owner_api = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/{self.owner_api_version}/owner",
-        self.auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
-
     def _secure_api_call(self, method: str, params: dict) -> dict:
         """
         Execute secure owner_api call, payload is encrypted
@@ -182,21 +174,13 @@ class HttpServer:
 
         tx_file_path = os.path.join(self.config.tx_files_directory, file_name)
 
-        try:
-            with open(tx_file_path, 'w') as file:
-                file.write(json.dumps(transaction))
+        with open(tx_file_path, 'w') as file:
+            file.write(json.dumps(transaction))
 
-            return tx_file_path
+        return tx_file_path
 
-        except Exception as e:
-            print(str(e))
-            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=init_slate['id']))
-
-    def receive_tx(self, tx_slate: dict | str, **kwargs):
+    def receive_tx(self, tx_slate: str, **kwargs):
         """Receive transaction using tx_slate and return response_tx_slate"""
-        if isinstance(tx_slate, str):
-            tx_slate = json.loads(tx_slate)
-
         params = {'slate': tx_slate, 'dest_acct_name': None, 'message': None}
 
         for key, value in kwargs.items():
@@ -628,6 +612,10 @@ class HttpServer:
         :params api: str, type of api (foreign or owner)
         :return: dict | None
         """
+
+        settings_ = self.settings.wallet
+        auth = (self.auth_user, self.parse_secret(settings_['api_secret_path']))
+
         payload = {
             'jsonrpc': '2.0',
             'id': 1,
@@ -635,10 +623,16 @@ class HttpServer:
             'params': params
             }
 
-        api_url = getattr(self, f"{api}_api")[0]
+        if api == 'foreign':
+            if settings_['owner_api_include_foreign']:
+                api_url = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/{self.foreign_api_version}/foreign"
+            else:
+                api_url = f"http://{settings_['api_listen_interface']}:{settings_['api_listen_port']}/{self.foreign_api_version}/foreign"
+        else:
+            api_url = f"http://{settings_['api_listen_interface']}:{settings_['owner_api_listen_port']}/{self.owner_api_version}/owner"
 
         try:
-            response = requests.post(api_url, json=payload, auth=self.auth)
+            response = requests.post(api_url, json=payload, auth=auth)
             return utils.parse_api_response(response)
         except Exception:
             raise SystemExit(f'Connection error, is wallet api running under: {api_url}?')
