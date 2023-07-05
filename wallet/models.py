@@ -208,12 +208,7 @@ class EpicBoxConfig(BaseModel):
         self.init_config()
 
     def init_config(self):
-        _full_address = f"{self.address}@{self.domain}"
-
-        if self.port:
-            _full_address = f"{_full_address}:{self.port}"
-
-        self.full_address = _full_address
+        self.full_address = f"{self.address}@{self.domain}"
 
     def get_short_address(self):
         return f"{self.address[0:4]}...{self.address[-4:]}"
@@ -233,6 +228,7 @@ class Config(BaseModel):
     node_address: str = ''
     epicbox_address: str = ''
     binary_file_path: str = ''
+    created_at_height: int = 0
     tx_files_directory: str = '.'
     wallet_data_directory: str = ''
 
@@ -255,10 +251,9 @@ class Config(BaseModel):
 
         with open(file, "w+") as f:
             f.write(file_info)
-            cfg_ = self.dict(exclude={'epicbox'})
             if self.epicbox:
-                cfg_['epicbox_address'] = self.epicbox.full_address
-            tomlkit.dump(cfg_, f)
+                self.epicbox_address = self.epicbox.full_address
+            tomlkit.dump(self.dict(exclude={'epicbox'}), f)
 
     @staticmethod
     def from_toml(file: str):
@@ -356,16 +351,14 @@ class Listener:
     @classmethod
     def log_monitor(cls, process, callback):
         """Run extra thread to keep monitoring process output, and parse important feedback"""
-        callback(text='started epicbox listener')
-
         while True:
             line = process.stdout.readline()
 
             if 'Broken pipe' in line:
                 cls.logger.error(line)
             elif line:
-                cls.logger.warning(line)
-                callback(text=' '.join(line.strip('\n').split(' ')[3:]))
+                # cls.logger.warning(line)
+                callback(' '.join(line.strip('\n').split(' ')[3:]))
 
     def __repr__(self):
         return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"

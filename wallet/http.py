@@ -1,4 +1,3 @@
-import datetime
 from decimal import Decimal
 import asyncio
 import base64
@@ -78,13 +77,24 @@ class HttpServer:
         return utils.parse_api_response(json.loads(decrypted_response))
 
     async def __aenter__(self):
-        while self._is_locked():
-            print("wallet is locked, queue the task")
-            await asyncio.sleep(2)
+        # Handle wallet busy with other operations (locked)
+        if self._is_locked():
+            retry = 30
+
+            while self._is_locked() and retry:
+                print("wallet is locked, queueing")
+                await asyncio.sleep(2)
+                retry -= 1
+
+            if self._is_locked():
+                raise Exception("wallet is busy, try later")
 
         try:
+            # Run owner_api server to handle wallet operations
             await self.run_server(method="owner_api")
             time.sleep(0.6)
+
+            # Initialize secure access to wallet API and lock it during the operation
             self._init_secure_api()
             self._lock()
             return await self._open_wallet()
@@ -94,9 +104,9 @@ class HttpServer:
             utils.logger.error(f"{e}")
 
     async def __aexit__(self, *args):
+        self._unlock()
         await asyncio.sleep(0.2)
         await self._close_wallet()
-        self._unlock()
 
     def _init_secure_api(self) -> None:
         """
@@ -263,7 +273,7 @@ class HttpServer:
         """
         params = {
             'token': self._token,
-            'start_height': start_height,
+            'start_height': int(start_height),
             'delete_unconfirmed': delete_unconfirmed,
             }
         await self._secure_api_call('scan', params)

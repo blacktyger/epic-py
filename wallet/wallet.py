@@ -1,7 +1,7 @@
-import asyncio
 import subprocess
 import datetime
 import decimal
+import asyncio
 import signal
 import json
 import os
@@ -32,7 +32,6 @@ class Wallet:
         if path:
             self.load_from_path(path)
 
-    @utils.benchmark
     async def create_new(self, **kwargs):
         # Make sure all the required arguments are provided
         REQUIRED = ('binary_file_path', 'password')
@@ -98,18 +97,25 @@ class Wallet:
         # Use HTTP API (owner and foreign) as context manager,
         # api calls are encrypted with token created only for current session
         async with self.api_http_server as provider:
+            # Get blockchain height when wallet was created
+            self.config.created_at_height = await self._get_height(provider)
+
+            # Scan the wallet against the blockchain
+            await provider.scan(start_height=self.config.created_at_height)
+
             # Get wallet accounts (usually just one, 'default') and load to the Account object
-            for i, acc in enumerate(provider.accounts()):
+            for i, acc in enumerate(await provider.accounts()):
                 self.accounts.append(models.Account(id=i, **acc))
 
             # Get the epic-box address
-            public_key = provider.get_public_address()['public_key']
+            pub_key_ = await provider.get_public_address()
+            pub_key = pub_key_['public_key']
             self.config.epicbox = models.EpicBoxConfig(
-                address=public_key, domain=self.settings.epicbox['epicbox_domain'],
+                address=pub_key, domain=self.settings.epicbox['epicbox_domain'],
                 index=self.settings.epicbox['epicbox_address_index'], port=self.settings.epicbox['epicbox_port'])
             self.config.to_toml()
 
-        return self
+        return {'error': 0, 'msg': "wallet created", 'data': self}
 
     def load_from_path(self, path: str):
         # Load created by wallet settings file to WalletTOML model
@@ -123,17 +129,27 @@ class Wallet:
 
         return self
 
-    async def run_epicbox(self, callback=None, force_run=False, logger=None) -> models.Listener | None:
-        already_running = utils.find_process_by_name('method epicbox')
+    async def _get_height(self, provider: HttpServer = None) -> dict:
+        if provider is None:
+            async with self.api_http_server as provider:
+                h = await provider.node_height()
+                return h['height']
+        else:
+            h = await provider.node_height()
+            return h['height']
 
-        if already_running:
-            self.logger.critical(f"Epicbox listener already running, PID: {already_running}")
+    async def run_epicbox(self, callback=None, force_run: bool = False, ignore_duplicate_name: bool = True, logger=None) -> models.Listener | None:
+        if not ignore_duplicate_name:
+            already_running = utils.find_process_by_name('method epicbox')
 
-            if force_run:
-                os.kill(already_running[0], signal.SIGKILL)
-                self.logger.debug(f"Epicbox listener process closed")
-            else:
-                return
+            if already_running:
+                self.logger.critical(f"Epicbox listener already running, PID: {already_running}")
+
+                if force_run:
+                    os.kill(already_running[0], signal.SIGKILL)
+                    self.logger.debug(f"Epicbox listener process closed")
+                else:
+                    return
 
         await self.api_http_server.run_server(method="epicbox", callback=callback, logger=logger)
 
@@ -144,7 +160,7 @@ class Wallet:
         version = version.decode().strip('\n').split(' ')[-1]
         return version
 
-    async def _start_updater(self, callback=None):
+    async def _start_updater(self, callback=None, interval: int = 10, timeout: int = 3*60):
         listener = await self.run_epicbox()
 
         async with self.api_http_server as provider:
@@ -152,7 +168,7 @@ class Wallet:
             start_time = datetime.datetime.now()
             self.updating = True
 
-            while self.updating and datetime.datetime.now() - start_time < datetime.timedelta(seconds=3*60):
+            while self.updating and datetime.datetime.now() - start_time < datetime.timedelta(seconds=timeout):
                 updated_txs = await provider.retrieve_txs()
 
                 if len(updated_txs) > txs_before:
@@ -164,7 +180,7 @@ class Wallet:
                         await callback(updated_txs[-num_of_new_txs:])
 
                 self.logger.debug(f"No new transactions")
-                await asyncio.sleep(10)
+                await asyncio.sleep(interval)
 
             listener.stop()
         try:
@@ -172,14 +188,21 @@ class Wallet:
         except UnboundLocalError:
             return []
 
-    async def get_balance(self, cached_time_tolerance: int = 10) -> models.Balance:
+    async def get_balance(self, cached_time_tolerance: int = 10) -> models.Balance | None:
         delta = datetime.datetime.now() + datetime.timedelta(seconds=cached_time_tolerance)
 
         # If latest cached balance is older than given tolerance (in seconds) refresh it from the node
         if not self._cached_balance or self._cached_balance.timestamp > delta:
-            async with self.api_http_server as provider:
-                self._cached_balance = models.Balance(**provider.retrieve_summary_info())
+            self.updating = True
+            try:
+                async with self.api_http_server as provider:
+                    self._cached_balance = models.Balance(**await provider.retrieve_summary_info())
+            except Exception as e:
+                self.logger.error(f"epic::wallet::get_balance(): {str(e)}")
+                self.updating = False
+                return
 
+        self.updating = False
         return self._cached_balance
 
     async def is_balance_enough(self, amount: float | str | int, fee: float | str | int = None)-> tuple:
