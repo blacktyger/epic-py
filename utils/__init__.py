@@ -131,7 +131,7 @@ def local_access_only(func):
     return wrapper
 
 
-def parse_api_response(response: Union[dict, requests.Response]):
+def parse_api_response(response: dict | requests.Response):
     """Handle EPIC API response errors"""
 
     if isinstance(response, requests.Response):
@@ -139,18 +139,17 @@ def parse_api_response(response: Union[dict, requests.Response]):
             if response.status_code == 401:
                 logger.info("Unauthorized to access API")
             else:
-                raise SystemExit(f"Error: {response.status_code}, {response.reason}")
+                raise Exception(f"Error: {response.status_code}, {response.reason}")
         try:
             response = response.json()
         except ValueError as e:
-            raise SystemExit(f"Error while reading api response: '{str(e)}'\n"
-                             f"Make sure your auth credentials are valid.")
+            raise Exception(f"Error while reading api response: '{str(e)}'\n Make sure your auth credentials are valid.")
 
     if "error" in response:
-        raise SystemExit(f'{response["error"]}')
+        raise Exception(f'{response["error"]}') from None
 
     elif "Err" in response:
-        raise SystemExit(f'{response["result"]}')
+        raise Exception(f'{response["result"]}') from None
 
     elif 'Ok' in response['result']:
         return response['result']['Ok']

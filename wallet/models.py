@@ -1,3 +1,5 @@
+import copy
+from types import NoneType
 from typing import Any
 import subprocess
 import threading
@@ -21,6 +23,70 @@ class Account(BaseModel):
         return f"Account({self.label}, [{self.id}])"
 
 
+class Transaction(BaseModel):
+    id: int
+    status: str
+    tx_type: str
+    tx_slate_id: str
+    fee: float
+    confirmed: bool
+    amount_credited: float
+    amount_debited: float
+    confirmation_ts: datetime.datetime | None
+    creation_ts: datetime.datetime
+    kernel_excess: str
+    messages: dict
+    num_inputs: int
+    num_outputs: int
+    parent_key_id: str
+    payment_proof: str | None
+    stored_tx: str | None
+    ttl_cutoff_height: int | None
+    kernel_lookup_min_height: int
+
+    def __init__(self, **kwargs):
+        readable_ints = ['amount_credited', 'amount_debited', 'fee']
+
+        for k, v in copy.copy(kwargs).items():
+            if k in readable_ints:
+                if isinstance(v, NoneType):
+                    kwargs[k] = 0
+                else:
+                    kwargs[k] = int(v) / 10**8
+
+        if 'Cancelled' in kwargs['tx_type']:
+            kwargs['status'] = 'Cancelled'
+        elif not kwargs['confirmed']:
+            kwargs['status'] = 'Pending'
+        elif kwargs['confirmed']:
+            kwargs['status'] = "Confirmed"
+        else:
+            kwargs['status'] = 'Unknown'
+
+        super().__init__(**kwargs)
+
+    def get_message(self):
+        if self.messages:
+            try:
+                return self.messages['messages'][0]['message']
+            except Exception as e:
+                print(e)
+                return ''
+
+    def __repr__(self):
+        if self.tx_type in ('TxSent', 'TxSentCancelled'):
+            amount = self.amount_debited - self.amount_credited - self.fee
+            tx_type = 'Sent    '
+        elif self.tx_type in ('TxReceived', 'TxReceivedCancelled'):
+            amount = self.amount_credited
+            tx_type = 'Received'
+        else:
+            tx_type = 'Mined   '
+            amount = self.amount_credited
+
+        return f"Transaction({tx_type} | {self.status} | {round(amount, 8)} | {self.tx_slate_id})"
+
+
 class Balance(BaseModel):
     amount_awaiting_confirmation: float
     amount_awaiting_finalization: float
@@ -35,7 +101,7 @@ class Balance(BaseModel):
     def __init__(self, **kwargs):
         ignore_fields = ('minimum_confirmations', 'last_confirmed_height')
 
-        # Change value format to human-readable floats from 100000000 to 1.0
+        # Change value format to human-readable floats, i.e. from 100000000 to 1
         for k, v in kwargs.items():
             if k not in ignore_fields:
                 kwargs[k] = int(v) / 10 ** 8
@@ -69,11 +135,11 @@ class Balance(BaseModel):
 
 
 class Settings(BaseModel):
-    file_path: str
     tor: dict = {}
     wallet: dict = {}
     logging: dict = {}
     epicbox: dict = {}
+    file_path: str
 
     def __init__(self, **data: Any):
         super().__init__(**data)
@@ -115,8 +181,8 @@ class Settings(BaseModel):
             print(f'"[{category}] {sub_category} {key}" key does not exists')
 
     def set(self, category, key, value, sub_category=None):
-
         self._load_from_file()
+
         if sub_category:
             data_ = getattr(self, category)
             data_[key][sub_category] = value
@@ -162,6 +228,7 @@ class Config(BaseModel):
     network: str = 'mainnet'
     epicbox: EpicBoxConfig = None
     password: str = ''
+    lock_file: str = ''
     description: str = ''
     node_address: str = ''
     epicbox_address: str = ''
@@ -202,16 +269,16 @@ class Config(BaseModel):
 class Listener:
     logger = utils.logger
 
-    def __init__(self, settings, config, method, logger=None):
+    def __init__(self, settings: Settings, config: Config, method: str, logger=None):
         if logger is None:
             logger = utils.logger
         self.logger = logger
-        self.settings: Settings = settings
+        self.config = config
+        self.settings = settings
         self.process: psutil.Process | None = None
-        self.config: Config = config
         self.method: str = method
 
-    def run(self, **kwargs):
+    async def run(self, **kwargs):
         flags = None
         password = utils.secrets.get(self.config.password)
         force_run = kwargs.get('force_run', False)  # if true close running listener and run new
@@ -262,13 +329,14 @@ class Listener:
                 self.logger.warning(f"{self.method} listener process is not None, but not running in system: {self.process}")
 
         elif not self.settings or not self.config:
-            self.logger.warning(f"wallet config not provided")
+            self.logger.warning(f"wallet config and/or settings not provided")
             return
 
         try:
             process = subprocess.Popen(arguments.split(' '), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
-            if self.method == 'epicbox':
+            # if self.method == 'epicbox':
+            if kwargs['callback']:
                 updater = threading.Thread(target=self.log_monitor, args=(process, kwargs['callback']))
                 updater.daemon = True
                 self.logger.debug(f">> Starting epicbox listener log monitor..")

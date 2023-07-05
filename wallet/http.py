@@ -1,5 +1,6 @@
+import datetime
 from decimal import Decimal
-from typing import Union
+import asyncio
 import base64
 import json
 import time
@@ -24,20 +25,29 @@ class HttpServer:
             ...
     ```
     """
-
     auth_user = 'epic'
     owner_api_version = 'v3'
     foreign_api_version = 'v2'
-    listeners: list[models.Listener] = []
 
     def __init__(self, settings, config):
         self.settings = settings
         self.config = config
         self._token: str = ''
         self._secret: PrivateKey = PrivateKey(os.urandom(32))
+        self.listeners: list[models.Listener] = []
         self._encryption_key: str = ''
 
-    def _secure_api_call(self, method: str, params: dict) -> dict:
+    def _lock(self, data: dict = None):
+        with open(self.config.lock_file, 'w') as lock_file:
+            lock_file.write(json.dumps(data))
+
+    def _unlock(self):
+        os.remove(self.config.lock_file)
+
+    def _is_locked(self) -> bool:
+        return os.path.isfile(self.config.lock_file)
+
+    async def _secure_api_call(self, method: str, params: dict) -> dict:
         """
         Execute secure owner_api call, payload is encrypted
         :param method: api call method name
@@ -67,19 +77,26 @@ class HttpServer:
 
         return utils.parse_api_response(json.loads(decrypted_response))
 
-    def __enter__(self):
+    async def __aenter__(self):
+        while self._is_locked():
+            print("wallet is locked, queue the task")
+            await asyncio.sleep(2)
+
         try:
-            self.run_server(method="owner_api")
-            time.sleep(1)
+            await self.run_server(method="owner_api")
+            time.sleep(0.6)
             self._init_secure_api()
-            return self._open_wallet()
+            self._lock()
+            return await self._open_wallet()
 
         except Exception as e:
+            self._unlock()
             utils.logger.error(f"{e}")
 
-    def __exit__(self, *args):
-        time.sleep(1)
-        self._close_wallet()
+    async def __aexit__(self, *args):
+        await asyncio.sleep(0.2)
+        await self._close_wallet()
+        self._unlock()
 
     def _init_secure_api(self) -> None:
         """
@@ -103,7 +120,7 @@ class HttpServer:
         # format to hex and remove first 2 bits
         self._encryption_key = self._encryption_key.format().hex()[2:]
 
-    def _open_wallet(self):
+    async def _open_wallet(self):
         """
         This is the second step in epic-wallet API workflow Make api_call to open_wallet instance,
         get authentication token and use it in all future api_calls for this wallet instance
@@ -113,24 +130,24 @@ class HttpServer:
             'name': 'default',
             'password': utils.secrets.get(self.config.password),
             }
-        self._token = self._secure_api_call('open_wallet', params)
+        self._token = await self._secure_api_call('open_wallet', params)
 
         return self
 
-    def run_server(self, method: str, callback=None, logger=None):
+    async def run_server(self, method: str, callback=None, logger=None):
         """Run listener process"""
         listener = models.Listener(settings=self.settings, config=self.config, method=method, logger=logger)
-        self.listeners.append(listener.run(force_run=True, callback=callback))
-        time.sleep(1)
+        self.listeners.append(await listener.run(force_run=True, callback=callback))
+        await asyncio.sleep(0.7)
         return self.listeners[-1]
 
-    def _close_wallet(self):
-        self.close()
+    async def _close_wallet(self):
+        await self.close()
         for listener in self.listeners:
             if listener.method != "epicbox":
                 listener.stop()
 
-    def send_via_epicbox(self, amount: float | int | str, address: str, **kwargs):
+    async def send_via_epicbox(self, amount: float | int | str, address: str, **kwargs):
         # Prepare transaction slate with partial data
         print('>> preparing epicbox transaction (init_send_tx)')
 
@@ -143,22 +160,15 @@ class HttpServer:
             }
 
         init_slate = self._prepare_slate(amount, **kwargs)
+        return await self.init_send_tx(init_slate)
 
-        try:
-            transaction = self.init_send_tx(init_slate)
-            return transaction
-
-        except Exception as e:
-            print(e)
-            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=init_slate['id']))
-
-    def send_via_file(self, amount: str, **kwargs) -> str:
+    async def send_via_file(self, amount: str, **kwargs) -> str:
         # Prepare transaction slate with partial data
         print('>> preparing file transaction (init_send_tx)')
 
         init_slate = self._prepare_slate(amount, **kwargs)
-        transaction = self.init_send_tx(init_slate)
-        self.tx_lock_outputs(transaction)
+        transaction = await self.init_send_tx(init_slate)
+        await self.tx_lock_outputs(transaction)
 
         # Set the file name, use tx_slate_id if not provided
         if 'file_name' in kwargs:
@@ -173,37 +183,37 @@ class HttpServer:
 
         return tx_file_path
 
-    def receive_tx(self, tx_slate: str, **kwargs):
+    async def receive_tx(self, tx_slate: str, **kwargs):
         """Receive transaction using tx_slate and return response_tx_slate"""
         params = {'slate': tx_slate, 'dest_acct_name': None, 'message': None}
 
         for key, value in kwargs.items():
             params[key] = value
 
-        return self._api_call('receive_tx', params=params, api='foreign')
+        return await self._api_call('receive_tx', params=params, api='foreign')
 
-    def node_height(self):
+    async def node_height(self):
         """Get block height from connected node"""
         params = {'token': self._token}
-        return self._secure_api_call('node_height', params)
+        return await self._secure_api_call('node_height', params)
 
-    def retrieve_txs(self, tx_id: int = None, tx_slate_id: str = None, refresh: bool = True) -> dict:
-        """Return wallet transaction history"""
+    async def retrieve_txs(self, tx_id: int = None, tx_slate_id: str = None, refresh: bool = True) -> list[models.Transaction]:
+        """Return wallet transactions"""
         params = {
             'token': self._token,
             'tx_id': tx_id,
             'tx_slate_id': tx_slate_id,
             'refresh_from_node': refresh,
             }
-        resp = self._secure_api_call('retrieve_txs', params)
+        resp = await self._secure_api_call('retrieve_txs', params)
 
         if refresh and not resp[0]:
             # We requested refresh but data was not successfully refreshed
             raise Exception(f"retrieve_outputs, failed to refresh data from the node")
 
-        return resp[1]
+        return [models.Transaction(**tx) for tx in resp[1]]
 
-    def retrieve_outputs(self, include_spent: bool = False, tx_id: int = None, refresh: bool = True):
+    async def retrieve_outputs(self, include_spent: bool = False, tx_id: int = None, refresh: bool = True):
         """
         Returns a list of outputs from the active account in the wallet.
         """
@@ -213,7 +223,7 @@ class HttpServer:
             'refresh_from_node': refresh,
             'tx_id': tx_id,
             }
-        resp = self._secure_api_call('retrieve_outputs', params)
+        resp = await self._secure_api_call('retrieve_outputs', params)
 
         if refresh and not resp[0]:
             # We requested refresh but data was not successfully refreshed
@@ -221,14 +231,14 @@ class HttpServer:
 
         return resp[1]
 
-    def retrieve_summary_info(self, minimum_confirmations: int = 1, refresh: bool = True):
+    async def retrieve_summary_info(self, minimum_confirmations: int = 1, refresh: bool = True):
         """Return wallet balance"""
         params = {
             'token': self._token,
             'refresh_from_node': refresh,
             'minimum_confirmations': minimum_confirmations,
             }
-        resp = self._secure_api_call('retrieve_summary_info', params)
+        resp = await self._secure_api_call('retrieve_summary_info', params)
 
         if refresh and not resp[0]:
             # We requested refresh but data was not successfully refreshed
@@ -236,17 +246,17 @@ class HttpServer:
 
         return resp[1]
 
-    def cancel_tx(self, tx_id: int = None, tx_slate_id: str = None):
+    async def cancel_tx(self, tx_id: int = None, tx_slate_id: str = None):
         params = {
             'token': self._token,
             'tx_id': tx_id,
             'tx_slate_id': tx_slate_id,
             }
-        self._secure_api_call('cancel_tx', params)
+        await self._secure_api_call('cancel_tx', params)
 
         return {'tx_id': tx_id, 'tx_slate_id': tx_slate_id}
 
-    def scan(self, start_height: int = 0, delete_unconfirmed: bool = False):
+    async def scan(self, start_height: int = 0, delete_unconfirmed: bool = False):
         """
         Scans the entire UTXO set from the node, identify which outputs belong to the given
         wallet update the wallet state to be consistent with what's currently in the UTXO set.
@@ -256,108 +266,108 @@ class HttpServer:
             'start_height': start_height,
             'delete_unconfirmed': delete_unconfirmed,
             }
-        self._secure_api_call('scan', params)
+        await self._secure_api_call('scan', params)
 
         return True
 
-    def finalize_tx(self, slate: str | dict):
+    async def finalize_tx(self, slate: str | dict):
         params = {
             'token': self._token,
             'slate': slate,
             }
 
-        return self._secure_api_call('finalize_tx', params)
+        return await self._secure_api_call('finalize_tx', params)
 
-    def get_stored_tx(self, tx_id: int = None, slate_id: str = None):
+    async def get_stored_tx(self, tx_id: int = None, slate_id: str = None):
         params = {
             'id': tx_id,
             'token': self._token,
             'slate_id': slate_id,
             }
-        return self._secure_api_call('get_stored_tx', params)
+        return await self._secure_api_call('get_stored_tx', params)
 
-    def init_send_tx(self, args):
+    async def init_send_tx(self, args):
         params = {
             'token': self._token,
             'args': args,
             }
 
-        return self._secure_api_call('init_send_tx', params)
+        return await self._secure_api_call('init_send_tx', params)
 
-    def issue_invoice_tx(self, args):
+    async def issue_invoice_tx(self, args):
         params = {
             'token': self._token,
             'args': args,
             }
 
-        return self._secure_api_call('issue_invoice_tx', params)
+        return await self._secure_api_call('issue_invoice_tx', params)
 
-    def post_tx(self, tx: dict, fluff: bool = False):
+    async def post_tx(self, tx: dict, fluff: bool = False):
         params = {
             'token': self._token,
             'tx': tx,
             'fluff': fluff,
             }
 
-        return self._secure_api_call('post_tx', params)
+        return await self._secure_api_call('post_tx', params)
 
-    def process_invoice_tx(self, slate: str | dict, args):
+    async def process_invoice_tx(self, slate: str | dict, args):
         params = {
             'token': self._token,
             'slate': slate,
             'args': args,
             }
 
-        return self._secure_api_call('process_invoice_tx', params)
+        return await self._secure_api_call('process_invoice_tx', params)
 
-    def tx_lock_outputs(self, slate: str | dict):
+    async def tx_lock_outputs(self, slate: str | dict):
         params = {
             'token': self._token,
             'slate': slate,
             "participant_id": 0
             }
-        self._secure_api_call('tx_lock_outputs', params)
+        await self._secure_api_call('tx_lock_outputs', params)
 
         return True
 
-    def accounts(self):
+    async def accounts(self):
         params = {'token': self._token}
 
-        return self._secure_api_call('accounts', params)
+        return await self._secure_api_call('accounts', params)
 
-    def get_public_address(self, index: int = 0):
+    async def get_public_address(self, index: int = 0):
         params = {
             'token': self._token,
             "derivation_index": index
             }
-        return self._secure_api_call('get_public_address', params)
+        return await self._secure_api_call('get_public_address', params)
 
-    def change_password(self, old: str, new: str, name: str = None):
+    async def change_password(self, old: str, new: str, name: str = None):
         params = {
             'name': name,
             'old': old,
             'new': new,
             }
-        self._secure_api_call('change_password', params)
+        await self._secure_api_call('change_password', params)
 
         return True
 
-    def close(self, name: str = None):
+    async def close(self, name: str = None):
         params = {'name': name}
-        self._secure_api_call('close_wallet', params)
+        await self._secure_api_call('close_wallet', params)
         return True
 
-    def create_account_path(self, label: str):
+    async def create_account_path(self, label: str):
         """Create account, "sub-wallet", different balances and public keys but one master seed"""
         params = {
             'token': self._token,
             'label': label,
             }
 
-        return self._secure_api_call('create_account_path', params)
+        return await self._secure_api_call('create_account_path', params)
 
-    def create_config(
-        self, chain_type: str = "Mainnet", wallet_config: dict = None, logging_config: dict = None, tor_config: dict = None, epicbox_config: dict = None):
+    async def create_config(self, chain_type: str = "Mainnet", wallet_config: dict = None, logging_config: dict = None,
+                      tor_config: dict = None, epicbox_config: dict = None):
         params = {
             'chain_type': chain_type,
             'wallet_config': wallet_config,
@@ -365,17 +375,17 @@ class HttpServer:
             'epicbox_config': epicbox_config,
             'tor_config': tor_config,
             }
-        self._secure_api_call('create_config', params)
+        await self._secure_api_call('create_config', params)
 
         return True
 
-    def delete_wallet(self, name: str = None):
+    async def delete_wallet(self, name: str = None):
         params = {'name': name}
-        self._secure_api_call('delete_wallet', params)
+        await self._secure_api_call('delete_wallet', params)
 
         return True
 
-    def get_mnemonic(self, password: str = None, name: str = None):
+    async def get_mnemonic(self, password: str = None, name: str = None):
         if password is None:
             password = utils.secret_manager.get(self.config.password)
 
@@ -384,17 +394,29 @@ class HttpServer:
             'password': password,
             }
 
-        return self._secure_api_call('get_mnemonic', params)
+        return await self._secure_api_call('get_mnemonic', params)
 
-    def get_top_level_directory(self):
-        return self._secure_api_call('get_top_level_directory', {})
+    async def get_top_level_directory(self):
+        return await self._secure_api_call('get_top_level_directory', {})
 
-    def get_updater_messages(self, count: int = 1):
+    async def start_updater(self, frequency: int):
+        params = {
+            'token': self._token,
+            'frequency': frequency,
+            }
+        await self._secure_api_call('start_updater', params)
+        return True
+
+    async def stop_updater(self):
+        await self._secure_api_call('stop_updater', {})
+        return True
+
+    async def get_updater_messages(self, count: int = 1):
         params = {'count': count}
 
-        return self._secure_api_call('get_updater_messages', params)
+        return await self._secure_api_call('get_updater_messages', params)
 
-    def retrieve_payment_proof(self, tx_id: int = None, tx_slate_id: str = None, refresh: bool = True):
+    async def retrieve_payment_proof(self, tx_id: int = None, tx_slate_id: str = None, refresh: bool = True):
         params = {
             'token': self._token,
             'tx_id': tx_id,
@@ -402,56 +424,44 @@ class HttpServer:
             'refresh_from_node': refresh,
             }
 
-        return self._secure_api_call('retrieve_payment_proof', params)
+        return await self._secure_api_call('retrieve_payment_proof', params)
 
-    def set_active_account(self, label: str):
+    async def set_active_account(self, label: str):
         params = {
             'token': self._token,
             'label': label,
             }
-        self._secure_api_call('set_active_account', params)
+        await self._secure_api_call('set_active_account', params)
 
         return True
 
-    def set_top_level_directory(self, dir_path: str):
+    async def set_top_level_directory(self, dir_path: str):
         params = {'dir': dir_path}
-        self._secure_api_call('set_top_level_directory', params)
+        await self._secure_api_call('set_top_level_directory', params)
 
         return True
 
-    def set_tor_config(self, tor_config: dict):
+    async def set_tor_config(self, tor_config: dict):
         params = {'tor_config': tor_config}
-        self._secure_api_call('set_tor_config', params)
+        await self._secure_api_call('set_tor_config', params)
 
         return True
 
-    def start_updater(self, frequency: int):
-        params = {
-            'token': self._token,
-            'frequency': frequency,
-            }
-        self._secure_api_call('start_updater', params)
-        return True
-
-    def stop_updater(self):
-        self._secure_api_call('stop_updater', {})
-        return True
-
-    def verify_payment_proof(self, proof: str):
+    async def verify_payment_proof(self, proof: str):
         params = {
             'token': self._token,
             'proof': proof,
             }
-        return self._secure_api_call('verify_payment_proof', params)
+        return await self._secure_api_call('verify_payment_proof', params)
 
-    def create_wallet(self, password: str, name: str = None, mnemonic: str = None, mnemonic_length: int = 24):
+    async def create_wallet(self, password: str, name: str = None, mnemonic: str = None, mnemonic_length: int = 24):
         params = {
             'name': name,
             'password': password,
             'mnemonic': mnemonic,
             'mnemonic_length': mnemonic_length,
             }
-        return self._secure_api_call('create_wallet', params)
+        return await self._secure_api_call('create_wallet', params)
 
     @staticmethod
     def _prepare_slate(amount: int | float | str, **kwargs) -> dict:
@@ -481,16 +491,16 @@ class HttpServer:
 
         return args
 
-    def _send_via_http(self, amount: float | int | str, address: str, **kwargs):
+    async def _send_via_http(self, amount: float | int | str, address: str, **kwargs):
         # Prepare transaction slate with partial data
         print('>> preparing transaction (init_send_tx)')
         transaction = self._prepare_slate(amount, **kwargs)
         address = f'{address}/{self.foreign_api_version}/foreign'
-        tx = self.init_send_tx(transaction)
+        tx = await self.init_send_tx(transaction)
 
         # Lock sender's outputs for transaction
         print('>> locking funds (lock_outputs)')
-        self.tx_lock_outputs(tx)
+        await self.tx_lock_outputs(tx)
 
         try:
             # Connect to receiver's foreign api wallet and send transaction slate
@@ -499,11 +509,11 @@ class HttpServer:
 
             # Validate receiver's transaction response slate
             print('>> validate receiver response (finalize)')
-            finalize = self.finalize_tx(response_tx)
+            finalize = await self.finalize_tx(response_tx)
 
             # Send transaction to network using connected node
             print('>> sending tx to network (post_tx)')
-            post_tx = self.post_tx(finalize['tx'])
+            post_tx = await self.post_tx(finalize['tx'])
 
             if post_tx:
                 print(f'>> transaction sent successfully')
@@ -511,7 +521,7 @@ class HttpServer:
 
         except Exception as e:
             print(e)
-            print('>> transaction failed, delete:', self.cancel_tx(tx_slate_id=tx['id']))
+            print('>> transaction failed, delete:', await self.cancel_tx(tx_slate_id=tx['id']))
             return
 
     @staticmethod
@@ -533,8 +543,8 @@ class HttpServer:
         response = requests.post(receiver_address, json=payload)
         return utils.parse_api_response(response)
 
-    # TODO: Something wrong with build_coinbase
-    def build_coinbase(self, fees: int = 0, height: int = 0, key_id: int = None):
+    async def build_coinbase(self, fees: int = 0, height: int = 0, key_id: int = None):
+        # TODO: Something wrong with build_coinbase
         method = 'build_coinbase'
         params = {"block_fees": fees}
 
@@ -615,4 +625,4 @@ class HttpServer:
             response = requests.post(api_url, json=payload, auth=auth)
             return utils.parse_api_response(response)
         except Exception:
-            raise SystemExit(f'Connection error, is wallet api running under: {api_url}?')
+            raise Exception(f'Connection error, is wallet api running under: {api_url}?')
