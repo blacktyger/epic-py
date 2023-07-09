@@ -22,6 +22,7 @@ class Wallet:
     _cached_balance: models.Balance = None
     api_http_server: HttpServer
     state: object = None
+    DECIMALS = 10 ** 8
 
     def __init__(self, path: str = None, logger=None):
         if logger is None:
@@ -82,6 +83,9 @@ class Wallet:
         if self.config.node_address:
             self.settings.set(category='wallet', key='check_node_api_http_addr', value=self.config.node_address)
 
+        if 'owner_api_listen_port' in kwargs:
+            self.settings.set(category='wallet', key='owner_api_listen_port', value=kwargs['owner_api_listen_port'])
+
         if 'epicbox_domain' in kwargs:
             self.settings.set(category='epicbox', key='epicbox_domain', value=kwargs['epicbox_domain'])
 
@@ -138,6 +142,13 @@ class Wallet:
             h = await provider.node_height()
             return h['height']
 
+    def _readable_ints(self, value: int | str) -> float | int:
+        """Parse big int numbers and return human-readable float/int values"""
+        if isinstance(value, str):
+            value = int(value)
+
+        return value / self.DECIMALS
+
     async def run_epicbox(self, callback=None, force_run: bool = False, ignore_duplicate_name: bool = True, logger=None) -> models.Listener | None:
         if not ignore_duplicate_name:
             already_running = utils.find_process_by_name('method epicbox')
@@ -159,6 +170,12 @@ class Wallet:
         version = subprocess.check_output([f"{self.config.binary_file_path}", '--version'])
         version = version.decode().strip('\n').split(' ')[-1]
         return version
+
+    def send_via_cli(self, amount: float | int, address: str, method: str, **kwargs):
+        password = utils.secrets.get(self.config.password)
+        arguments = f'{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} send -m {method} -d {address} {amount} -c 1'
+        print(arguments)
+        return subprocess.check_output(arguments.split(' '))
 
     async def _start_updater(self, callback=None, interval: int = 10, timeout: int = 3*60):
         listener = await self.run_epicbox()
@@ -220,7 +237,7 @@ class Wallet:
 
     async def send_epicbox_tx(self, amount: float | int, address: str, **kwargs)-> dict:
         """
-        Send EPIC transaction epicbox method
+        Send EPIC transaction vit epicbox method
         :param amount: int | float, transaction amount
         :param address: str, receiver epicbox address
         """

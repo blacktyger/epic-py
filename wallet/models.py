@@ -337,7 +337,7 @@ class Listener:
                 self.logger.debug(f">> Starting epicbox listener log monitor..")
                 updater.start()
 
-            self.logger.info(f">> {self.method} listener started [PID: {process.pid}]..")
+            self.logger.info(f">> {self.method} listener started [PID: {process.pid} | PORT: {listen_port}]..")
 
             self.process = psutil.Process(int(process.pid))
         except Exception as e:

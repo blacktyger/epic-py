@@ -41,10 +41,46 @@ class HttpServer:
             lock_file.write(json.dumps(data))
 
     def _unlock(self):
-        os.remove(self.config.lock_file)
+        if self._is_locked():
+            os.remove(self.config.lock_file)
 
     def _is_locked(self) -> bool:
         return os.path.isfile(self.config.lock_file)
+
+    async def __aenter__(self):
+        # Handle when  wallet is busy with other operations (locked)
+        print("WALLET PROVIDER STARTING...")
+        print(self._is_locked())
+
+        if self._is_locked():
+            retry = 30
+
+            while self._is_locked() and retry:
+                print("wallet is locked, queueing")
+                await asyncio.sleep(2)
+                retry -= 1
+
+            if self._is_locked():
+                raise Exception("wallet is busy, try later")
+
+        try:
+            # Run owner_api server to handle wallet operations
+            await self.run_server(method="owner_api")
+            time.sleep(0.6)
+
+            # Initialize secure access to wallet API and lock it during the operation
+            self._init_secure_api()
+            self._lock()
+            return await self._open_wallet()
+
+        except Exception as e:
+            self._unlock()
+            utils.logger.error(f"{e}")
+
+    async def __aexit__(self, *args):
+        await asyncio.sleep(0.2)
+        await self._close_wallet()
+        self._unlock()
 
     async def _secure_api_call(self, method: str, params: dict) -> dict:
         """
@@ -75,38 +111,6 @@ class HttpServer:
         decrypted_response = self._decrypt(encrypted_response, nonce)
 
         return utils.parse_api_response(json.loads(decrypted_response))
-
-    async def __aenter__(self):
-        # Handle wallet busy with other operations (locked)
-        if self._is_locked():
-            retry = 30
-
-            while self._is_locked() and retry:
-                print("wallet is locked, queueing")
-                await asyncio.sleep(2)
-                retry -= 1
-
-            if self._is_locked():
-                raise Exception("wallet is busy, try later")
-
-        try:
-            # Run owner_api server to handle wallet operations
-            await self.run_server(method="owner_api")
-            time.sleep(0.6)
-
-            # Initialize secure access to wallet API and lock it during the operation
-            self._init_secure_api()
-            self._lock()
-            return await self._open_wallet()
-
-        except Exception as e:
-            self._unlock()
-            utils.logger.error(f"{e}")
-
-    async def __aexit__(self, *args):
-        self._unlock()
-        await asyncio.sleep(0.2)
-        await self._close_wallet()
 
     def _init_secure_api(self) -> None:
         """
@@ -486,7 +490,7 @@ class HttpServer:
             "src_acct_name": None,
             "amount": amount,
             "minimum_confirmations": 1,
-            "max_outputs": 500,
+            "max_outputs": 100,
             "num_change_outputs": 1,
             "selection_strategy_is_use_all": False,
             "message": "Epic transaction",
