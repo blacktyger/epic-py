@@ -88,46 +88,51 @@ class Transaction(BaseModel):
 
 
 class Balance(BaseModel):
-    amount_awaiting_confirmation: float
-    amount_awaiting_finalization: float
-    amount_currently_spendable: float
-    last_confirmed_height: int
-    minimum_confirmations: float
-    amount_immature: float
-    amount_locked: float
+    amount_awaiting_confirmation: float | None = 0
+    amount_awaiting_finalization: float | None = 0
+    amount_currently_spendable: float | None = 0
+    last_confirmed_height: int | None = 0
+    minimum_confirmations: float | None = 0
+    amount_immature: float | None = 0
+    amount_locked: float | None = 0
     timestamp: datetime.datetime
-    total: float
+    outputs: int | None = 0
+    total: float | None = 0
+    error: str | None = ''
 
     def __init__(self, **kwargs):
-        ignore_fields = ('minimum_confirmations', 'last_confirmed_height')
+        ignore_fields = ('minimum_confirmations', 'last_confirmed_height', 'error', 'outputs')
 
         # Change value format to human-readable floats, i.e. from 100000000 to 1
         for k, v in kwargs.items():
             if k not in ignore_fields:
-                kwargs[k] = int(v) / 10 ** 8
+                try:
+                    kwargs[k] = int(v) / 10 ** 8
+                except:
+                    kwargs[k] = float(v)
 
         kwargs['timestamp'] = datetime.datetime.now()
 
         super().__init__(**kwargs)
 
     @property
-    def awaiting_confirmation(self):
+    def pending(self):
         return self.amount_awaiting_confirmation
 
     @property
-    def awaiting_finalization(self):
+    def to_finalize(self):
         return self.amount_awaiting_finalization
 
     @property
-    def currently_spendable(self):
+    def spendable(self):
         return self.amount_currently_spendable
 
     @property
-    def currently_immature(self):
+    def immature(self):
         return self.amount_immature
 
     @property
-    def currently_locked(self):
+    def locked(self):
         return self.amount_locked
 
     def __repr__(self):

@@ -151,7 +151,7 @@ class HttpServer:
     async def run_server(self, method: str, callback=None, logger=None):
         """Run listener process"""
         listener = models.Listener(settings=self.settings, config=self.config, method=method, logger=logger)
-        self.listeners.append(await listener.run(force_run=True, callback=callback))
+        self.listeners.append(await listener.run(force_run=False, callback=callback))
         await asyncio.sleep(0.7)
         return self.listeners[-1]
 
@@ -160,6 +160,13 @@ class HttpServer:
         for listener in self.listeners:
             if listener.method != "epicbox":
                 listener.stop()
+
+    async def get_fees(self, amount: float | int | str, **kwargs):
+        print('>> calculate the fees (dry-run)')
+        init_slate = self._prepare_slate(amount, estimate_only=True, **kwargs)
+        response = await self.init_send_tx(init_slate)
+
+        return response['fee']
 
     async def send_via_epicbox(self, amount: float | int | str, address: str, **kwargs):
         # Prepare transaction slate with partial data
@@ -497,6 +504,7 @@ class HttpServer:
             "target_slate_version": None,
             "payment_proof_recipient_address": None,
             "ttl_blocks": None,
+            "estimate_only": False,
             "send_args": None
             }
 

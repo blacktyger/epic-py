@@ -167,23 +167,39 @@ class Wallet:
         return self.api_http_server.listeners[-1]
 
     def get_version(self) -> str:
+        """Get epic-wallet cli version"""
         version = subprocess.check_output([f"{self.config.binary_file_path}", '--version'])
         version = version.decode().strip('\n').split(' ')[-1]
         return version
 
-    def send_via_cli(self, amount: float | int, address: str, method: str, **kwargs):
+    def send_via_cli(self, amount: float | int, address: str, method: str, outputs: int = 1, confirmations: int = 1) -> str:
+        """
+        Send transaction using command line
+        :param amount: float|int, transaction value
+        :param address: str, address where to send
+        :param method: str, transaction method (epicbox, file, self, emoji
+        :param outputs: int, number of change outputs to create
+        :param confirmations: int, number of confirmations needed to confirm transaction
+        """
         password = utils.secrets.get(self.config.password)
-        arguments = f'{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} send -m {method} -d {address} {amount} -c 1'
-        print(arguments)
-        return subprocess.check_output(arguments.split(' '))
+        arguments = f'{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} ' \
+                    f'send -m {method} -d {address} {amount} -c {confirmations} -o {outputs}'
+        process = subprocess.Popen(arguments.split(' '), text=True)
+        stdout, stderr = process.communicate()
+        return stdout
 
     async def _start_updater(self, callback=None, interval: int = 10, timeout: int = 3*60):
+        """
+        Strat epicbox listener background process with transaction listener, terminate after first received transaction or timeout
+        :param callback: callable, function executed when transaction is received
+        :param interval: int, how often (in seconds) get new updates
+        :param timeout: int, how long keep the listener process running before terminating
+        """
         listener = await self.run_epicbox()
 
         async with self.api_http_server as provider:
             txs_before = len(await provider.retrieve_txs())
             start_time = datetime.datetime.now()
-            self.updating = True
 
             while self.updating and datetime.datetime.now() - start_time < datetime.timedelta(seconds=timeout):
                 updated_txs = await provider.retrieve_txs()
@@ -205,7 +221,13 @@ class Wallet:
         except UnboundLocalError:
             return []
 
-    async def get_balance(self, cached_time_tolerance: int = 10) -> models.Balance | None:
+    async def get_balance(self, get_outputs: bool = False, cached_time_tolerance: int = 10) -> models.Balance | None:
+        """
+        Get epic-wallet balance
+        :param get_outputs: bool, if true return number of available unspent outputs
+        :param cached_time_tolerance: int, use previously cached balance if no older than this value (in seconds)
+        """
+
         delta = datetime.datetime.now() + datetime.timedelta(seconds=cached_time_tolerance)
 
         # If latest cached balance is older than given tolerance (in seconds) refresh it from the node
@@ -213,29 +235,60 @@ class Wallet:
             self.updating = True
             try:
                 async with self.api_http_server as provider:
-                    self._cached_balance = models.Balance(**await provider.retrieve_summary_info())
+                    # Get the wallet balance
+                    balance_ = await provider.retrieve_summary_info()
+                    self._cached_balance = models.Balance(**balance_)
+
+                    if get_outputs:
+                        # Get the wallet unspent outputs quantity
+                        outputs = await provider.retrieve_outputs(refresh=False)
+                        self._cached_balance.outputs = len(outputs)
+
             except Exception as e:
                 self.logger.error(f"epic::wallet::get_balance(): {str(e)}")
+                self._cached_balance = models.Balance(error=str(e))
                 self.updating = False
                 return
 
         self.updating = False
         return self._cached_balance
 
-    async def is_balance_enough(self, amount: float | str | int, fee: float | str | int = None)-> tuple:
+    async def calculate_fees(self, amount: float | int, **kwargs) -> dict:
+        """
+        Calculate transaction fee for the given amount
+        :param amount: float|int, transaction value
+        """
+        try:
+            async with self.api_http_server as provider:
+                response = await provider.get_fees(amount, **kwargs)
+                return {'error': False, 'msg': 'get fee success', 'data': self._readable_ints(response)}
+
+        except Exception as e:
+            return {'error': True, 'msg': f'{str(e)}', 'data': None}
+
+    async def is_balance_enough(self, amount: float | str | int, fee: float | str | int = None) -> tuple:
+        """
+        Check if wallet balance is enough to send given amount (including fees)
+        :param amount: float|int, transaction value
+        :param fee: float|str, fee value, optional
+
+        """
         balance = await self.get_balance()
+
         if not fee:
-            fee = 0.008
+            # Calculate the transaction fee
+            with self.api_http_server as provider:
+                fee = await provider.get_fee(amount)
 
         fee = decimal.Decimal(str(fee))
         amount = decimal.Decimal(str(amount))
 
-        if balance.currently_spendable > (amount + fee):
+        if balance.spendable > (amount + fee):
             return True, balance
         else:
             return False, balance
 
-    async def send_epicbox_tx(self, amount: float | int, address: str, **kwargs)-> dict:
+    async def send_epicbox_tx(self, amount: float | int, address: str, **kwargs) -> dict:
         """
         Send EPIC transaction vit epicbox method
         :param amount: int | float, transaction amount
@@ -250,7 +303,7 @@ class Wallet:
         except Exception as e:
             return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
-    async def send_file_tx(self, amount: int | float | str, **kwargs)-> dict:
+    async def send_file_tx(self, amount: int | float | str, **kwargs) -> dict:
         """
         Send EPIC transaction via transaction file method
         :param amount: int | float, transaction amount
@@ -265,7 +318,7 @@ class Wallet:
         except Exception as e:
             return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
-    async def receive_file_tx(self, init_tx_file: str, response_tx_file: str)-> dict:
+    async def receive_file_tx(self, init_tx_file: str, response_tx_file: str) -> dict:
         """
         Receive EPIC transaction via transaction file method
         :param init_tx_file: str, path of the init transaction file (input)
@@ -287,7 +340,7 @@ class Wallet:
         except Exception as e:
             return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
-    async def finalize_file_tx(self, response_tx_file: str)-> bool:
+    async def finalize_file_tx(self, response_tx_file: str) -> bool:
         """
         Finalize EPIC transaction via transaction file method
         :param response_tx_file: str, path of the response transaction file (input)
@@ -301,5 +354,5 @@ class Wallet:
             provider.post_tx(tx=finalize_slate['tx'])
             return True
 
-    def __str__(self):
-        return f"EpicWallet(wallet_dir='{self.config.name}')"
+    # def __str__(self):
+    #     return f"EpicWallet(wallet_dir='{self.config.name}')"
