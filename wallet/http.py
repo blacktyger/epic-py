@@ -163,7 +163,6 @@ class HttpServer:
 
     async def get_fees(self, amount: float | int | str, **kwargs):
         print('>> calculate the fees (dry-run)')
-        #TODO GOWNO
         init_slate = self._prepare_slate(amount, estimate_only=True, **kwargs)
         response = await self.init_send_tx(init_slate)
 

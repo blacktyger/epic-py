@@ -136,6 +136,13 @@ class Balance(BaseModel):
     def locked(self):
         return self.amount_locked
 
+    def significant(self):
+        return f"Total: {self.total}\n" \
+               f"Spendable: {self.spendable}\n" \
+               f"To Finalize: {self.to_finalize}\n" \
+               f"Pending: {self.pending}\n" \
+               f"Locked: {self.locked}"
+
     def __repr__(self):
         return f"Balance({str(self.total)}, [{self.last_confirmed_height}])"
 

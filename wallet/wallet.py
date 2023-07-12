@@ -133,14 +133,14 @@ class Wallet:
 
         return self
 
-    async def _get_height(self, provider: HttpServer = None) -> dict:
+    async def _get_height(self, provider: HttpServer = None) -> int:
         if provider is None:
             async with self.api_http_server as provider:
                 h = await provider.node_height()
-                return h['height']
+                return int(h['height'])
         else:
             h = await provider.node_height()
-            return h['height']
+            return int(h['height'])
 
     def _readable_ints(self, value: int | str) -> Decimal:
         """Parse big int numbers and return human-readable float/int values"""
@@ -170,21 +170,26 @@ class Wallet:
         version = version.decode().strip('\n').split(' ')[-1]
         return version
 
-    def send_via_cli(self, amount: float | int, address: str, method: str, outputs: int = 1, confirmations: int = 1) -> str:
+    def send_via_cli(self, amount: float | int, method: str, address: str = None, outputs: int = 1, confirmations: int = 1,
+                     selection_strategy: str = 'smallest') -> bool:
         """
         Send transaction using command line
         :param amount: float|int, transaction value
-        :param address: str, address where to send
         :param method: str, transaction method (epicbox, file, self, emoji
+        :param address: str, address where to send
         :param outputs: int, number of change outputs to create
         :param confirmations: int, number of confirmations needed to confirm transaction
+        :param selection_strategy: str, either to use all outputs (mix) or minimum required, possible ['smallest', 'all']
         """
+        address = f'-d {address} ' if address else ''
         password = utils.secrets.get(self.config.password)
         arguments = f'{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} ' \
-                    f'send -m {method} -d {address} {amount} -c {confirmations} -o {outputs}'
-        process = subprocess.Popen(arguments.split(' '), text=True)
-        stdout, stderr = process.communicate()
-        return stdout
+                    f'send -m {method} {address}{amount} -c {confirmations} -o {outputs} -s {selection_strategy}'
+        try:
+            subprocess.Popen(arguments.split(' '), text=True)
+            return True
+        except Exception as e:
+            return False
 
     async def _start_updater(self, callback=None, interval: int = 5, timeout: int = 3*60):
         """
@@ -251,7 +256,7 @@ class Wallet:
         self.updating = False
         return self._cached_balance
 
-    async def calculate_fees(self, amount: float | int | str, **kwargs) -> Decimal:
+    async def calculate_fees(self, amount: float | int | str, **kwargs) -> Decimal | None:
         """
         Calculate transaction fee for the given amount
         :param amount: float|int, transaction value
@@ -263,34 +268,60 @@ class Wallet:
 
         except Exception as e:
             print(e)
-            return Decimal('0.08')
+            return None
 
-    async def is_balance_enough(self, amount: float | str | int, fee: float | str | int = None) -> tuple:
+    async def is_balance_enough(self, amount: float | str | int, tx_height: int = None) -> bool:
         """
         Check if wallet balance is enough to send given amount (including fees)
         :param amount: float|int, transaction value
-        :param fee: float|str, fee value, optional
-
+        :param tx_height: int, block height of the transaction when was created
         """
-        balance = await self.get_balance()
+        # On which height to start checking wallet balance, prevents unnecessary spam before transaction is confirmed
+        delta_height = 4
 
-        if not fee:
-            try:
+        try:
+            async with self.api_http_server as provider:
+                # If provided tx_height wait for blockchain to mine delta_height blocks before checking the balance
+                if tx_height:
+                    network_height = await self._get_height(provider)
+                    while (int(tx_height) + delta_height) > network_height:
+
+                        print(f'network height: {network_height}, tx_height: {tx_height}, '
+                              f'{int(tx_height) + delta_height - network_height} blocks left')
+                        await asyncio.sleep(20)
+                        network_height = await self._get_height(provider)
+
                 # Calculate the transaction fee
-                async with self.api_http_server as provider:
-                    fee = await provider.get_fees(amount)
-            except Exception as e:
-                fee = 0.007 * 10 ** 8
+                fee = self._readable_ints(await provider.get_fees(amount))
+                balance = await provider.retrieve_summary_info()
+                balance = self._cached_balance = models.Balance(**balance)
+                return fee + balance.spendable > Decimal(amount)
 
-        fee = Decimal(str(self._readable_ints(fee)))
-        amount = Decimal(str(amount))
+        except Exception as e:
+            print(e)
+            return False
 
-        print(balance.spendable, (amount + fee))
+    async def create_outputs(self, num: int, **kwargs):
+        """
+        Create extra _num_ outputs in the wallet, it will join all existing outputs in to single one before executing
+        :param num: int, number of outputs to create, min: 2, max: 15
+        """
+        if not 1 < num <= 15:
+            return {'error': True, 'msg': 'Wrong amount of outputs to create, min: 2, max: 15', 'data': None}
 
-        if balance.spendable > (amount + fee):
-            return True, balance
-        else:
-            return False, balance
+        try:
+            async with self.api_http_server as provider:
+                outputs = await provider.retrieve_outputs(**kwargs)
+                current_outputs = len(outputs)
+                if current_outputs + (num + current_outputs) > 100:
+                    return {'error': True, 'msg': f'Max outputs per wallet: 100, now: {current_outputs}', 'data': None}
+        except Exception as e:
+            return {'error': True, 'msg': f'{str(e)}', 'data': None}
+
+        total_outputs = current_outputs + num
+        self.send_via_cli(amount=0.0001, method='self', outputs=total_outputs, selection_strategy='all')
+
+        return
 
     async def send_epicbox_tx(self, amount: float | int | str, address: str, **kwargs) -> dict:
         """
