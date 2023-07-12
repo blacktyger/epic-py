@@ -1,9 +1,10 @@
-import copy
+from _decimal import Decimal
 from types import NoneType
 from typing import Any
 import subprocess
 import threading
 import datetime
+import copy
 import uuid
 import os
 
@@ -28,10 +29,10 @@ class Transaction(BaseModel):
     status: str
     tx_type: str
     tx_slate_id: str
-    fee: float
+    fee: Decimal
     confirmed: bool
-    amount_credited: float
-    amount_debited: float
+    amount_credited: Decimal
+    amount_debited: Decimal
     confirmation_ts: datetime.datetime | None
     creation_ts: datetime.datetime
     kernel_excess: str
@@ -52,7 +53,7 @@ class Transaction(BaseModel):
                 if isinstance(v, NoneType):
                     kwargs[k] = 0
                 else:
-                    kwargs[k] = int(v) / 10**8
+                    kwargs[k] = Decimal(v) / Decimal(10**8)
 
         if 'Cancelled' in kwargs['tx_type']:
             kwargs['status'] = 'Cancelled'
@@ -84,32 +85,32 @@ class Transaction(BaseModel):
             tx_type = 'Mined   '
             amount = self.amount_credited
 
-        return f"Transaction({tx_type} | {self.status} | {round(amount, 8)} | {self.tx_slate_id})"
+        return f"Transaction({tx_type} | {self.status} | {str(amount)} | {self.tx_slate_id})"
 
 
 class Balance(BaseModel):
-    amount_awaiting_confirmation: float | None = 0
-    amount_awaiting_finalization: float | None = 0
-    amount_currently_spendable: float | None = 0
+    amount_awaiting_confirmation: Decimal | None = 0
+    amount_awaiting_finalization: Decimal | None = 0
+    amount_currently_spendable: Decimal | None = 0
     last_confirmed_height: int | None = 0
-    minimum_confirmations: float | None = 0
-    amount_immature: float | None = 0
-    amount_locked: float | None = 0
+    minimum_confirmations: int | None = 1
+    amount_immature: Decimal | None = 0
+    amount_locked: Decimal | None = 0
     timestamp: datetime.datetime
     outputs: int | None = 0
-    total: float | None = 0
+    total: Decimal | None = 0
     error: str | None = ''
 
     def __init__(self, **kwargs):
         ignore_fields = ('minimum_confirmations', 'last_confirmed_height', 'error', 'outputs')
 
-        # Change value format to human-readable floats, i.e. from 100000000 to 1
+        # Change value format to human-readable decimals, i.e. from 100000000 to 1
         for k, v in kwargs.items():
             if k not in ignore_fields:
                 try:
-                    kwargs[k] = int(v) / 10 ** 8
+                    kwargs[k] = Decimal(v) / Decimal(10 ** 8)
                 except:
-                    kwargs[k] = float(v)
+                    kwargs[k] = Decimal(v)
 
         kwargs['timestamp'] = datetime.datetime.now()
 
@@ -136,7 +137,7 @@ class Balance(BaseModel):
         return self.amount_locked
 
     def __repr__(self):
-        return f"Balance({self.total}, [{self.last_confirmed_height}])"
+        return f"Balance({str(self.total)}, [{self.last_confirmed_height}])"
 
 
 class Settings(BaseModel):

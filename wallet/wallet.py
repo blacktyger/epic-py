@@ -5,9 +5,9 @@ import asyncio
 import signal
 import json
 import os
+from _decimal import Decimal
 
 from .http import HttpServer
-from ..utils import defaults
 from . import models
 from .. import utils
 
@@ -22,7 +22,7 @@ class Wallet:
     _cached_balance: models.Balance = None
     api_http_server: HttpServer
     state: object = None
-    DECIMALS = 10 ** 8
+    DECIMALS = Decimal(10 ** 8)
 
     def __init__(self, path: str = None, logger=None):
         if logger is None:
@@ -73,7 +73,7 @@ class Wallet:
         subprocess.Popen(args.split(' ')).wait()
 
         # Load created by wallet settings file to WalletTOML model
-        settings_file = f"{os.path.join(self.config.wallet_data_directory, defaults.BINARY_NAME)}.toml"
+        settings_file = f"{os.path.join(self.config.wallet_data_directory, utils.defaults.BINARY_NAME)}.toml"
         self.settings = models.Settings(file_path=settings_file)
         self.api_http_server = HttpServer(self.settings, self.config)
 
@@ -126,7 +126,7 @@ class Wallet:
         config_file = os.path.join(path, "config.toml")
         self.config = models.Config.from_toml(config_file)
 
-        settings_file = f"{os.path.join(self.config.wallet_data_directory, defaults.BINARY_NAME)}.toml"
+        settings_file = f"{os.path.join(self.config.wallet_data_directory, utils.defaults.BINARY_NAME)}.toml"
         self.settings = models.Settings(file_path=settings_file)
 
         self.api_http_server = HttpServer(self.settings, self.config)
@@ -142,11 +142,9 @@ class Wallet:
             h = await provider.node_height()
             return h['height']
 
-    def _readable_ints(self, value: int | str) -> float | int:
+    def _readable_ints(self, value: int | str) -> Decimal:
         """Parse big int numbers and return human-readable float/int values"""
-        if isinstance(value, str):
-            value = int(value)
-
+        value = Decimal(value)
         return value / self.DECIMALS
 
     async def run_epicbox(self, callback=None, force_run: bool = False, ignore_duplicate_name: bool = True, logger=None) -> models.Listener | None:
@@ -188,7 +186,7 @@ class Wallet:
         stdout, stderr = process.communicate()
         return stdout
 
-    async def _start_updater(self, callback=None, interval: int = 10, timeout: int = 3*60):
+    async def _start_updater(self, callback=None, interval: int = 5, timeout: int = 3*60):
         """
         Strat epicbox listener background process with transaction listener, terminate after first received transaction or timeout
         :param callback: callable, function executed when transaction is received
@@ -253,7 +251,7 @@ class Wallet:
         self.updating = False
         return self._cached_balance
 
-    async def calculate_fees(self, amount: float | int, **kwargs) -> dict:
+    async def calculate_fees(self, amount: float | int | str, **kwargs) -> Decimal:
         """
         Calculate transaction fee for the given amount
         :param amount: float|int, transaction value
@@ -261,10 +259,11 @@ class Wallet:
         try:
             async with self.api_http_server as provider:
                 response = await provider.get_fees(amount, **kwargs)
-                return {'error': False, 'msg': 'get fee success', 'data': self._readable_ints(response)}
+                return self._readable_ints(response)
 
         except Exception as e:
-            return {'error': True, 'msg': f'{str(e)}', 'data': None}
+            print(e)
+            return Decimal('0.08')
 
     async def is_balance_enough(self, amount: float | str | int, fee: float | str | int = None) -> tuple:
         """
@@ -276,19 +275,24 @@ class Wallet:
         balance = await self.get_balance()
 
         if not fee:
-            # Calculate the transaction fee
-            with self.api_http_server as provider:
-                fee = await provider.get_fee(amount)
+            try:
+                # Calculate the transaction fee
+                async with self.api_http_server as provider:
+                    fee = await provider.get_fees(amount)
+            except Exception as e:
+                fee = 0.007 * 10 ** 8
 
-        fee = decimal.Decimal(str(fee))
-        amount = decimal.Decimal(str(amount))
+        fee = Decimal(str(self._readable_ints(fee)))
+        amount = Decimal(str(amount))
+
+        print(balance.spendable, (amount + fee))
 
         if balance.spendable > (amount + fee):
             return True, balance
         else:
             return False, balance
 
-    async def send_epicbox_tx(self, amount: float | int, address: str, **kwargs) -> dict:
+    async def send_epicbox_tx(self, amount: float | int | str, address: str, **kwargs) -> dict:
         """
         Send EPIC transaction vit epicbox method
         :param amount: int | float, transaction amount
