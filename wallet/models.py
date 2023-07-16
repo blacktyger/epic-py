@@ -97,7 +97,7 @@ class Balance(BaseModel):
     amount_immature: Decimal | None = 0
     amount_locked: Decimal | None = 0
     timestamp: datetime.datetime
-    outputs: int | None = 0
+    outputs: list | None = list()
     total: Decimal | None = 0
     error: str | None = ''
 

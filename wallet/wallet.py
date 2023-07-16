@@ -6,6 +6,7 @@ import signal
 import json
 import os
 from _decimal import Decimal
+from pprint import pprint
 
 from .http import HttpServer
 from . import models
@@ -181,6 +182,7 @@ class Wallet:
         :param confirmations: int, number of confirmations needed to confirm transaction
         :param selection_strategy: str, either to use all outputs (mix) or minimum required, possible ['smallest', 'all']
         """
+
         address = f'-d {address} ' if address else ''
         password = utils.secrets.get(self.config.password)
         arguments = f'{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} ' \
@@ -245,7 +247,7 @@ class Wallet:
                     if get_outputs:
                         # Get the wallet unspent outputs quantity
                         outputs = await provider.retrieve_outputs(refresh=False)
-                        self._cached_balance.outputs = len(outputs)
+                        self._cached_balance.outputs = outputs
 
             except Exception as e:
                 self.logger.error(f"epic::wallet::get_balance(): {str(e)}")
@@ -310,18 +312,21 @@ class Wallet:
             return {'error': True, 'msg': 'Wrong amount of outputs to create, min: 2, max: 15', 'data': None}
 
         try:
-            async with self.api_http_server as provider:
-                outputs = await provider.retrieve_outputs(**kwargs)
-                current_outputs = len(outputs)
-                if current_outputs + (num + current_outputs) > 100:
-                    return {'error': True, 'msg': f'Max outputs per wallet: 100, now: {current_outputs}', 'data': None}
+            balance = await self.get_balance(get_outputs=True, **kwargs)
+            current_outputs = len(balance.outputs)
+            if current_outputs + num > 100:
+                return {'error': True, 'msg': f'Max outputs per wallet: 100, now: {current_outputs}', 'data': None}
         except Exception as e:
             return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
-        total_outputs = current_outputs + num
-        self.send_via_cli(amount=0.0001, method='self', outputs=total_outputs, selection_strategy='all')
+        try:
+            tx_value = Decimal(balance.total / Decimal(num + 1)).quantize(Decimal('.000001'))
+            outputs_to_create = num - 1
 
-        return
+            self.send_via_cli(amount=(float(tx_value)), method='self', outputs=outputs_to_create, selection_strategy='all')
+            return {'error': False, 'msg': f'Outputs created successfully', 'data': None}
+        except Exception as e:
+            return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
     async def send_epicbox_tx(self, amount: float | int | str, address: str, **kwargs) -> dict:
         """
