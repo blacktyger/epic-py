@@ -8,6 +8,8 @@ import os
 from _decimal import Decimal
 from pprint import pprint
 
+import psutil
+
 from .http import HttpServer
 from . import models
 from .. import utils
@@ -25,12 +27,14 @@ class Wallet:
     state: object = None
     DECIMALS = Decimal(10 ** 8)
 
-    def __init__(self, path: str = None, logger=None):
+    def __init__(self, path: str = None, logger=None, long_running: bool = False):
         if logger is None:
             logger = utils.logger
 
         self.logger = logger
         self.updating = False
+        self.long_running = long_running
+
         if path:
             self.load_from_path(path)
 
@@ -124,13 +128,14 @@ class Wallet:
 
     def load_from_path(self, path: str):
         # Load created by wallet settings file to WalletTOML model
+        self.logger.info(f'Load wallet from path: {path}')
         config_file = os.path.join(path, "config.toml")
         self.config = models.Config.from_toml(config_file)
 
         settings_file = f"{os.path.join(self.config.wallet_data_directory, utils.defaults.BINARY_NAME)}.toml"
         self.settings = models.Settings(file_path=settings_file)
 
-        self.api_http_server = HttpServer(self.settings, self.config)
+        self.api_http_server = HttpServer(self.settings, self.config, self.long_running)
 
         return self
 
@@ -148,7 +153,7 @@ class Wallet:
         value = Decimal(value)
         return value / self.DECIMALS
 
-    async def run_epicbox(self, callback=None, force_run: bool = False, ignore_duplicate_name: bool = True, logger=None) -> models.Listener | None:
+    async def run_epicbox(self, callback=None, force_run: bool = False, ignore_duplicate_name: bool = False, logger=None) -> models.Listener | None:
         if not ignore_duplicate_name:
             already_running = utils.find_process_by_name('method epicbox')
 
@@ -159,7 +164,8 @@ class Wallet:
                     os.kill(already_running[0], signal.SIGKILL)
                     self.logger.debug(f"Epicbox listener process closed")
                 else:
-                    return
+                    return models.Listener(config=self.config, settings=self.settings,
+                                           process=psutil.Process(already_running[0]), method='epicbox')
 
         await self.api_http_server.run_server(method="epicbox", callback=callback, logger=logger)
 
@@ -233,27 +239,28 @@ class Wallet:
         :param cached_time_tolerance: int, use previously cached balance if no older than this value (in seconds)
         """
 
-        delta = datetime.datetime.now() + datetime.timedelta(seconds=cached_time_tolerance)
+        # If latest cached balance is not older than given tolerance (in seconds) don't refresh
+        if self._cached_balance:
+            if datetime.datetime.now() < self._cached_balance.timestamp + datetime.timedelta(seconds=cached_time_tolerance):
+                return self._cached_balance
 
-        # If latest cached balance is older than given tolerance (in seconds) refresh it from the node
-        if not self._cached_balance or self._cached_balance.timestamp > delta:
-            self.updating = True
-            try:
-                async with self.api_http_server as provider:
-                    # Get the wallet balance
-                    balance_ = await provider.retrieve_summary_info()
-                    self._cached_balance = models.Balance(**balance_)
+        self.updating = True
+        try:
+            async with self.api_http_server as provider:
+                # Get the wallet balance
+                balance_ = await provider.retrieve_summary_info()
+                self._cached_balance = models.Balance(**balance_)
 
-                    if get_outputs:
-                        # Get the wallet unspent outputs quantity
-                        outputs = await provider.retrieve_outputs(refresh=False)
-                        self._cached_balance.outputs = outputs
+                if get_outputs:
+                    # Get the wallet unspent outputs quantity
+                    outputs = await provider.retrieve_outputs(refresh=False)
+                    self._cached_balance.outputs = outputs
 
-            except Exception as e:
-                self.logger.error(f"epic::wallet::get_balance(): {str(e)}")
-                self._cached_balance = models.Balance(error=str(e))
-                self.updating = False
-                return
+        except Exception as e:
+            self.logger.error(f"epic::wallet::get_balance(): {str(e)}")
+            self._cached_balance = models.Balance(error=str(e))
+            self.updating = False
+            return
 
         self.updating = False
         return self._cached_balance

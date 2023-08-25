@@ -2,7 +2,6 @@ from decimal import Decimal
 import asyncio
 import base64
 import json
-import time
 import os
 
 from coincurve import PublicKey, PrivateKey
@@ -11,6 +10,7 @@ import requests
 
 from .. import utils
 from . import models
+
 
 class HttpServer:
     """
@@ -28,7 +28,9 @@ class HttpServer:
     owner_api_version = 'v3'
     foreign_api_version = 'v2'
 
-    def __init__(self, settings, config):
+    def __init__(self, settings, config, long_running: bool = False):
+        self.long_running = long_running
+        self.is_open: bool = False
         self.settings = settings
         self.config = config
         self._token: str = ''
@@ -48,39 +50,34 @@ class HttpServer:
         return os.path.isfile(self.config.lock_file)
 
     async def __aenter__(self):
-        # Handle when  wallet is busy with other operations (locked)
-        print("WALLET PROVIDER STARTING...")
-        print(self._is_locked())
-
-        if self._is_locked():
-            retry = 30
-
-            while self._is_locked() and retry:
-                print("wallet is locked, queueing")
-                await asyncio.sleep(2)
-                retry -= 1
-
+        if not self.long_running:
+            # Handle when  wallet is busy with other operations (locked)
             if self._is_locked():
-                raise Exception("wallet is busy, try later")
+                retry = 30
+
+                while self._is_locked() and retry:
+                    print("wallet is locked, queueing")
+                    await asyncio.sleep(2)
+                    retry -= 1
+
+                if self._is_locked():
+                    raise Exception("wallet is busy, try later")
 
         try:
-            # Run owner_api server to handle wallet operations
-            await self.run_server(method="owner_api")
-            time.sleep(0.6)
+            if not self.is_open:
+                return await self.open()
 
-            # Initialize secure access to wallet API and lock it during the operation
-            self._init_secure_api()
-            self._lock()
-            return await self._open_wallet()
+            return self
 
         except Exception as e:
             self._unlock()
             utils.logger.error(f"{e}")
 
     async def __aexit__(self, *args):
-        await asyncio.sleep(0.2)
-        await self._close_wallet()
-        self._unlock()
+        if not self.long_running:
+            await asyncio.sleep(0.2)
+            await self._close_wallet()
+            self._unlock()
 
     async def _secure_api_call(self, method: str, params: dict) -> dict:
         """
@@ -161,6 +158,21 @@ class HttpServer:
             if listener.method != "epicbox":
                 listener.stop()
 
+    async def open(self):
+        # Run owner_api server to handle wallet operations
+        print(f">> OPENING THE WALLET")
+        await self.run_server(method="owner_api")
+        await asyncio.sleep(0.6)
+
+        # Initialize secure access to wallet API and lock it during the operation
+        self._init_secure_api()
+        self.is_open = True
+
+        if not self.long_running:
+            self._lock()
+
+        return await self._open_wallet()
+
     async def get_fees(self, amount: float | int | str, **kwargs):
         print('>> calculate the fees (dry-run)')
         init_slate = self._prepare_slate(amount, estimate_only=True, **kwargs)
@@ -218,7 +230,8 @@ class HttpServer:
         params = {'token': self._token}
         return await self._secure_api_call('node_height', params)
 
-    async def retrieve_txs(self, tx_id: int = None, tx_slate_id: str = None, refresh: bool = True) -> list[models.Transaction]:
+    async def retrieve_txs(self, tx_id: int = None, tx_slate_id: str = None, refresh: bool = True) -> list[
+        models.Transaction]:
         """Return wallet transactions"""
         params = {
             'token': self._token,
@@ -376,6 +389,9 @@ class HttpServer:
     async def close(self, name: str = None):
         params = {'name': name}
         await self._secure_api_call('close_wallet', params)
+        print(f">> CLOSING THE WALLET")
+        self.is_open = False
+
         return True
 
     async def create_account_path(self, label: str):
@@ -388,7 +404,7 @@ class HttpServer:
         return await self._secure_api_call('create_account_path', params)
 
     async def create_config(self, chain_type: str = "Mainnet", wallet_config: dict = None, logging_config: dict = None,
-                      tor_config: dict = None, epicbox_config: dict = None):
+                            tor_config: dict = None, epicbox_config: dict = None):
         params = {
             'chain_type': chain_type,
             'wallet_config': wallet_config,
@@ -491,7 +507,7 @@ class HttpServer:
         elif isinstance(amount, Decimal):
             amount = round(float(amount), 8)
 
-        amount = int(amount * 10**8)
+        amount = int(amount * 10 ** 8)
 
         args = {
             "src_acct_name": None,
@@ -646,5 +662,6 @@ class HttpServer:
         try:
             response = requests.post(api_url, json=payload, auth=auth)
             return utils.parse_api_response(response)
+
         except Exception:
             raise Exception(f'Connection error, is wallet api running under: {api_url}?')

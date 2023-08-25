@@ -10,3 +10,4 @@ epic_sdk.egg-info/
 .idea/
 /utils/test.py
 tests/
+/wallet/test.py

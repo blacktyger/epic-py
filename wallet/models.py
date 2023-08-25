@@ -277,13 +277,13 @@ class Config(BaseModel):
 class Listener:
     logger = utils.logger
 
-    def __init__(self, settings: Settings, config: Config, method: str, logger=None):
+    def __init__(self, settings: Settings, config: Config, method: str, logger=None, process=None):
         if logger is None:
             logger = utils.logger
         self.logger = logger
         self.config = config
         self.settings = settings
-        self.process: psutil.Process | None = None
+        self.process: psutil.Process = process
         self.method: str = method
 
     async def run(self, **kwargs):
@@ -373,9 +373,6 @@ class Listener:
                 # cls.logger.warning(line)
                 callback(' '.join(line.strip('\n').split(' ')[3:]))
 
-    def __repr__(self):
-        return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"
-
     def stop(self):
         if self.process:
             try:
@@ -385,3 +382,9 @@ class Listener:
 
             self.process = None
             self.logger.info(f"'{self.method}' listener closed")
+
+    def __repr__(self):
+        if self.process is not None:
+            return f"Listener(Method: '{self.method}', Process: PID[{self.process.pid}] | {self.process.status()})"
+        else:
+            return f"Listener(Method: '{self.method}', Finished)"
