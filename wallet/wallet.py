@@ -1,12 +1,10 @@
 import subprocess
 import datetime
-import decimal
 import asyncio
 import signal
 import json
 import os
 from _decimal import Decimal
-from pprint import pprint
 
 import psutil
 
@@ -98,9 +96,8 @@ class Wallet:
             self.settings.set(category='logging', key='stdout_log_level', value="DEBUG")
             self.settings.set(category='logging', key='file_log_level', value="DEBUG")
 
-        # Save password to secure storage with pass manager and store only reference to it
-        utils.secrets.set(f"{utils.defaults.PASSWORD_STORAGE_PATH}/{self.config.id}", value=self.config.password)
-        self.config.password = f"{utils.defaults.PASSWORD_STORAGE_PATH}/{self.config.id}"
+        # Save password to storage and store only reference to it
+        self.config.password = utils.secrets.set(value=self.config.password, path=self.config.wallet_data_directory)
         self.config.to_toml()
 
         # Use HTTP API (owner and foreign) as context manager,

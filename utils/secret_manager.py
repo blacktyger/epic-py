@@ -13,7 +13,7 @@ BEFORE USING THIS SCRIPT:
 - pass init <gpg-id>
 """
 
-os.environ["PYPASS_GPG_BIN"] = "/usr/bin/gpg"
+os.environ["PYPASS_GPG_BIN"] = "/usr/bin/gpg2"
 
 gpg = gnupg.GPG()
 store = passpy.Store(gpg_bin=os.environ["PYPASS_GPG_BIN"])
@@ -33,9 +33,16 @@ except OSError:
 
 def get(path: str):
     """Return value stored with `pass` manager"""
-    return store.get_key(path=path).strip()
+    # return store.get_key(path=path).strip()
+    with open(os.path.join(path, f'.secret'), 'r') as file:
+        return file.read()
 
 
-def set(path: str, value):
+def set(value, path: str):
     """Sety new key:value stored with `pass` manager"""
-    return store.set_key(path=path, key_data=value, force=False)
+    # print(path, value)
+    # return store.set_key(path=path, key_data=value, force=False)
+    with open(os.path.join(path, f'.secret'), 'w') as file:
+        file.write(value)
+
+    return path
