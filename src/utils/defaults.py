@@ -20,10 +20,10 @@ wallet_owner_port = 3420
 PASSWORD_STORAGE_PATH = "Wallets/passwords"
 EPICBOX_NODE = 'epicbox.fastepic.eu'
 EPICBOX_PORT = 443
-SOURCE_PATH = "/home/blacktyger/epic-wallet/target/release"
 PUBLIC_NODE = 'https://btlabs.tech/node'
 LOCAL_NODE = "http://127.0.0.1:3413"
 BINARY_NAME = 'epic-wallet'
+BINARY_PATH = f"/home/blacktyger/epic-wallet/target/release/{BINARY_NAME}"
 PASSWORD = 'majkut11'
 NETWORK = 'mainnet'
 

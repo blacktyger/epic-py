@@ -41,7 +41,7 @@ class Wallet:
         REQUIRED = ('binary_file_path', 'password')
 
         if not all(arg in kwargs for arg in REQUIRED):
-            raise SystemExit(f'Missing required argument/s, provide all: {REQUIRED}') from None
+            raise Exception(f'Missing required argument/s, provide all: {REQUIRED}') from None
 
         # Get models.Config fields from kwargs
         config_ = dict()
@@ -54,7 +54,7 @@ class Wallet:
 
         # Make sure binary wallet-cli file exists
         if not os.path.isfile(self.config.binary_file_path):
-            raise SystemExit(f'Invalid wallet-cli {self.config.binary_file_path} binary file path') from None
+            raise Exception(f'Invalid wallet-cli {self.config.binary_file_path} binary file path') from None
 
         # Create new top_dir wallet directory
         try:
@@ -175,7 +175,7 @@ class Wallet:
         return version
 
     def send_via_cli(self, amount: float | int, method: str, address: str = None, outputs: int = 1, confirmations: int = 1,
-                     selection_strategy: str = 'smallest') -> bool:
+                     selection_strategy: str = 'smallest') -> dict:
         """
         Send transaction using command line
         :param amount: float|int, transaction value
@@ -191,10 +191,11 @@ class Wallet:
         arguments = f'{self.config.binary_file_path} -p {password} -t {self.config.wallet_data_directory} -c {self.config.wallet_data_directory} ' \
                     f'send -m {method} {address}{amount} -c {confirmations} -o {outputs} -s {selection_strategy}'
         try:
-            subprocess.Popen(arguments.split(' '), text=True)
-            return True
+            process = subprocess.Popen(arguments.split(' '), text=True)
+            return {'error': False, 'msg': f'tx sent successfully', 'data': process.stdout}
+
         except Exception as e:
-            return False
+            return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
     async def _start_updater(self, callback=None, interval: int = 5, timeout: int = 3*60):
         """
@@ -328,7 +329,7 @@ class Wallet:
             outputs_to_create = num - 1
 
             self.send_via_cli(amount=(float(tx_value)), method='self', outputs=outputs_to_create, selection_strategy='all')
-            return {'error': False, 'msg': f'Outputs created successfully', 'data': None}
+            return {'error': False, 'msg': f'Outputs created successfully', 'data': {'outputs': num}}
         except Exception as e:
             return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
@@ -342,6 +343,7 @@ class Wallet:
         try:
             async with self.api_http_server as provider:
                 response = await provider.send_via_epicbox(address=address, amount=amount, **kwargs)
+                print(f">> transaction sent successfully")
                 return {'error': False, 'msg': 'Transaction sent successfully', 'data': response}
 
         except Exception as e:
