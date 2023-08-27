@@ -9,7 +9,7 @@ import grpclib.client
 if typing.TYPE_CHECKING:
     import grpclib.server
 
-import server_pb2
+from . import server_pb2
 
 
 class WalletServerBase(abc.ABC):
