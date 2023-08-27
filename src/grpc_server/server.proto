@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+message WalletRequest {
+  string call = 1;
+  optional string data = 2;
+}
+
+message WalletResponse {
+  string result = 1;
+}
+
+service WalletServer {
+  rpc Call (WalletRequest) returns (WalletResponse) {}
+}

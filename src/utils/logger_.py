@@ -87,26 +87,27 @@ def setup_logging(console_log_output, console_log_level, console_log_color, logf
         logger.addHandler(console_handler)
 
     # Create log file handler
-    # try:
-    #     logfile_handler = logging.FileHandler(logfile_file)
-    # except Exception as exception:
-    #     print("Failed to set up log file: %s" % str(exception))
-    #     return logger
+    try:
+        logfile_handler = logging.FileHandler(logfile_file)
+    except Exception as exception:
+        print("Failed to set up log file: %s" % str(exception))
+        return logger
 
     # Set log file log level
-    # try:
-    #     logfile_handler.setLevel(logfile_log_level.upper())  # only accepts uppercase level names
-    # except:
-    #     print("Failed to set log file log level: invalid level: '%s'" % logfile_log_level)
-    #     return logger
+    try:
+        logfile_handler.setLevel(logfile_log_level.upper())  # only accepts uppercase level names
+    except:
+        print("Failed to set log file log level: invalid level: '%s'" % logfile_log_level)
+        return logger
 
     # Create and set formatter, add log file handler to logger
-    # logfile_formatter = LogFormatter(fmt=log_line_template, color=logfile_log_color)
-    # logfile_handler.setFormatter(logfile_formatter)
-    # logger.addHandler(logfile_handler)
+    logfile_formatter = LogFormatter(fmt=log_line_template, color=logfile_log_color)
+    logfile_handler.setFormatter(logfile_formatter)
+    logger.addHandler(logfile_handler)
 
     # Success
     return logger
+
 
 
 def get_logger():
