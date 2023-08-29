@@ -125,7 +125,7 @@ class Wallet:
 
     def load_from_path(self, path: str):
         # Load created by wallet settings file to WalletTOML model
-        self.logger.info(f'Load wallet from path: {path}')
+        self.logger.info(f'[WALLET_INST]: Load wallet from path: {path}')
         config_file = os.path.join(path, "config.toml")
         self.config = models.Config.from_toml(config_file)
 
@@ -274,41 +274,10 @@ class Wallet:
                 return self._readable_ints(response)
 
         except Exception as e:
-            print(e)
+            utils.logger.error(str(e))
             return None
 
-    async def is_balance_enough(self, amount: float | str | int, tx_height: int = None) -> bool:
-        """
-        Check if wallet balance is enough to send given amount (including fees)
-        :param amount: float|int, transaction value
-        :param tx_height: int, block height of the transaction when was created
-        """
-        # On which height to start checking wallet balance, prevents unnecessary spam before transaction is confirmed
-        delta_height = 4
-
-        try:
-            async with self.api_http_server as provider:
-                # If provided tx_height wait for blockchain to mine delta_height blocks before checking the balance
-                if tx_height:
-                    network_height = await self._get_height(provider)
-                    while (int(tx_height) + delta_height) > network_height:
-
-                        print(f'network height: {network_height}, tx_height: {tx_height}, '
-                              f'{int(tx_height) + delta_height - network_height} blocks left')
-                        await asyncio.sleep(20)
-                        network_height = await self._get_height(provider)
-
-                # Calculate the transaction fee
-                fee = self._readable_ints(await provider.get_fees(amount))
-                balance = await provider.retrieve_summary_info()
-                balance = self._cached_balance = models.Balance(**balance)
-                return fee + balance.spendable > Decimal(amount)
-
-        except Exception as e:
-            print(e)
-            return False
-
-    async def create_outputs(self, num: int, **kwargs):
+    async def create_outputs(self, num: int, **kwargs) -> dict:
         """
         Create extra _num_ outputs in the wallet, it will join all existing outputs in to single one before executing
         :param num: int, number of outputs to create, min: 2, max: 15
@@ -333,6 +302,44 @@ class Wallet:
         except Exception as e:
             return {'error': True, 'msg': f'{str(e)}', 'data': None}
 
+    async def get_transactions(self, status: str = None, tx_type: str = None, tx_slate_id: str = None, refresh: bool = True) -> dict:
+        """
+        Get wallet local database transactions record
+        :param tx_slate_id: str, transaction uuid
+        :param tx_type: str, possible: 'sent', 'received'
+        :param refresh: bool, whether refresh from node
+        :param status: str, possible: 'confirmed', 'pending', 'failed', 'unknown'
+        :return: dict with data as list of models.Transaction objects
+        """
+        try:
+            async with self.api_http_server as provider:
+                response = await provider.retrieve_txs(tx_slate_id=tx_slate_id, refresh=refresh)
+
+                def filter_(tx):
+                    return (status is None or tx.status.lower() == status) and (tx_type is None or tx_type in tx.tx_type.lower())
+
+                if status or tx_type:
+                    response = filter(lambda tx: filter_(tx), response)
+
+                return {'error': False, 'msg': 'Transaction history success', 'data': list(response)}
+
+        except Exception as e:
+            return {'error': True, 'msg': f'{str(e)}', 'data': None}
+
+    async def cancel_transaction(self, tx_slate_id: str = None) -> dict:
+        """
+        Cancel transaction in local wallet database
+        :param tx_slate_id: str, transaction uuid
+        :return: dict
+        """
+        try:
+            async with self.api_http_server as provider:
+                await provider.cancel_tx(tx_slate_id=tx_slate_id)
+                return {'error': False, 'msg': 'Transaction cancelled', 'data': tx_slate_id}
+
+        except Exception as e:
+            return {'error': True, 'msg': f'{str(e)}', 'data': None}
+
     async def send_epicbox_tx(self, amount: float | int | str, address: str, **kwargs) -> dict:
         """
         Send EPIC transaction vit epicbox method
@@ -343,7 +350,7 @@ class Wallet:
         try:
             async with self.api_http_server as provider:
                 response = await provider.send_via_epicbox(address=address, amount=amount, **kwargs)
-                print(f">> transaction sent successfully")
+                utils.logger.info(f"[WALLET_INST]: transaction sent successfully")
                 return {'error': False, 'msg': 'Transaction sent successfully', 'data': response}
 
         except Exception as e:
@@ -391,7 +398,7 @@ class Wallet:
         Finalize EPIC transaction via transaction file method
         :param response_tx_file: str, path of the response transaction file (input)
         """
-        print(response_tx_file)
+        utils.logger.debug(response_tx_file)
         with open(response_tx_file, 'r') as file:
             tx_response_slate = json.loads(file.read())
 
@@ -400,5 +407,5 @@ class Wallet:
             provider.post_tx(tx=finalize_slate['tx'])
             return True
 
-    # def __str__(self):
-    #     return f"EpicWallet(wallet_dir='{self.config.name}')"
+    def __str__(self):
+        return f"EpicWallet(wallet_dir='{self.config.name}')"

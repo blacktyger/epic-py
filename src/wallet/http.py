@@ -56,7 +56,7 @@ class HttpServer:
                 retry = 30
 
                 while self._is_locked() and retry:
-                    utils.logger.debug("wallet is locked, queueing")
+                    utils.logger.info("[WALLET_HTTP]: is locked, queueing")
                     await asyncio.sleep(2)
                     retry -= 1
 
@@ -153,15 +153,18 @@ class HttpServer:
         return self.listeners[-1]
 
     async def _close_wallet(self):
+        utils.logger.info(f"[WALLET_HTTP]: CLOSING THE WALLET")
+        self.is_open = False
         await self.close()
+
         for listener in self.listeners:
             if listener.method != "epicbox":
                 listener.stop()
 
-    async def open(self):
+    async def open(self, callback=None):
         # Run owner_api server to handle wallet operations
-        utils.logger.debug(f">> OPENING THE WALLET")
-        await self.run_server(method="owner_api")
+        utils.logger.info(f"[WALLET_HTTP]: OPENING THE WALLET")
+        await self.run_server(method="owner_api", callback=callback)
         await asyncio.sleep(0.6)
 
         # Initialize secure access to wallet API and lock it during the operation
@@ -174,7 +177,7 @@ class HttpServer:
         return await self._open_wallet()
 
     async def get_fees(self, amount: float | int | str, **kwargs):
-        utils.logger.debug('>> calculate the fees (dry-run)')
+        utils.logger.info('[WALLET_HTTP]: calculate the fees (dry-run)')
         init_slate = self._prepare_slate(amount, estimate_only=True, **kwargs)
         response = await self.init_send_tx(init_slate)
 
@@ -182,7 +185,7 @@ class HttpServer:
 
     async def send_via_epicbox(self, amount: float | int | str, address: str, **kwargs):
         # Prepare transaction slate with partial data
-        utils.logger.debug('>> preparing epicbox transaction (init_send_tx)')
+        utils.logger.info('[WALLET_HTTP]: preparing epicbox transaction (init_send_tx)')
 
         kwargs["send_args"] = {
             "method": "epicbox",
@@ -197,7 +200,7 @@ class HttpServer:
 
     async def send_via_file(self, amount: str, **kwargs) -> str:
         # Prepare transaction slate with partial data
-        utils.logger.debug('>> preparing file transaction (init_send_tx)')
+        utils.logger.info('[WALLET_HTTP]: preparing file transaction (init_send_tx)')
 
         init_slate = self._prepare_slate(amount, **kwargs)
         transaction = await self.init_send_tx(init_slate)
@@ -389,9 +392,6 @@ class HttpServer:
     async def close(self, name: str = None):
         params = {'name': name}
         await self._secure_api_call('close_wallet', params)
-        utils.logger.debug(f">> CLOSING THE WALLET")
-        self.is_open = False
-
         return True
 
     async def create_account_path(self, label: str):
@@ -531,35 +531,35 @@ class HttpServer:
 
     async def _send_via_http(self, amount: float | int | str, address: str, **kwargs):
         # Prepare transaction slate with partial data
-        utils.logger.debug('>> preparing transaction (init_send_tx)')
+        utils.logger.info('[WALLET_HTTP]: preparing transaction (init_send_tx)')
         transaction = self._prepare_slate(amount, **kwargs)
         address = f'{address}/{self.foreign_api_version}/foreign'
         tx = await self.init_send_tx(transaction)
 
         # Lock sender's outputs for transaction
-        utils.logger.debug('>> locking funds (lock_outputs)')
+        utils.logger.info('[WALLET_HTTP]: locking funds (lock_outputs)')
         await self.tx_lock_outputs(tx)
 
         try:
             # Connect to receiver's foreign api wallet and send transaction slate
-            utils.logger.debug('>> sending slate to receiver (receive_tx)')
+            utils.logger.info('[WALLET_HTTP]: sending slate to receiver (receive_tx)')
             response_tx = self.send_to_receiver_via_http(address, tx)
 
             # Validate receiver's transaction response slate
-            utils.logger.debug('>> validate receiver response (finalize)')
+            utils.logger.info('[WALLET_HTTP]: validate receiver response (finalize)')
             finalize = await self.finalize_tx(response_tx)
 
             # Send transaction to network using connected node
-            utils.logger.debug('>> sending tx to network (post_tx)')
+            utils.logger.info('[WALLET_HTTP]: sending tx to network (post_tx)')
             post_tx = await self.post_tx(finalize['tx'])
 
             if post_tx:
-                utils.logger.debug(f'>> transaction sent successfully')
+                utils.logger.info(f"[WALLET_HTTP]: transaction sent successfully")
                 return finalize
 
         except Exception as e:
             utils.logger.error(e)
-            utils.logger.debug('>> transaction failed, delete:', await self.cancel_tx(tx_slate_id=tx['id']))
+            utils.logger.error('>> transaction failed, delete:', await self.cancel_tx(tx_slate_id=tx['id']))
             return
 
     @staticmethod

@@ -56,13 +56,13 @@ class Transaction(BaseModel):
                     kwargs[k] = Decimal(v) / Decimal(10**8)
 
         if 'Cancelled' in kwargs['tx_type']:
-            kwargs['status'] = 'Cancelled'
+            kwargs['status'] = 'cancelled'
         elif not kwargs['confirmed']:
-            kwargs['status'] = 'Pending'
+            kwargs['status'] = 'pending'
         elif kwargs['confirmed']:
-            kwargs['status'] = "Confirmed"
+            kwargs['status'] = "confirmed"
         else:
-            kwargs['status'] = 'Unknown'
+            kwargs['status'] = 'unknown'
 
         super().__init__(**kwargs)
 
@@ -307,7 +307,7 @@ class Listener:
                 command = 'listen'
                 flags = method_flag
             case _:
-                self.logger.error(f'"{self.method}" is not a valid listening method')
+                self.logger.error(f'[WALLET_HTTP]: "{self.method}" is not a valid listening method')
                 return
 
         arguments += f" {command}"
@@ -321,43 +321,42 @@ class Listener:
 
             if external_process_pid not in (None, 0, '0'):
                 self.process = psutil.Process(int(external_process_pid))
-                self.logger.info(f"{self.method} listener already running! PID: [{self.process.pid}]..")
+                self.logger.info(f"[WALLET_HTTP]: {self.method} listener already running! PID: [{self.process.pid}]..")
 
                 if force_run:
-                    self.logger.warning(f"force_running = True, closing running listener {self.process.pid}")
+                    self.logger.warning(f"[WALLET_HTTP]: force_running = True, closing running listener {self.process.pid}")
                     self.stop()
                 else:
                     return self
 
         if self.process:
             if psutil.pid_exists(self.process.pid):
-                self.logger.info(f"{self.method} listener already running [PID: {self.process.pid}]..")
+                self.logger.info(f"[WALLET_HTTP]: {self.method} listener already running [PID: {self.process.pid}]..")
                 return self
             else:
-                self.logger.warning(f"{self.method} listener process is not None, but not running in system: {self.process}")
+                self.logger.warning(f"[WALLET_HTTP]: {self.method} listener process is not None, but not running in system: {self.process}")
 
         elif not self.settings or not self.config:
-            self.logger.warning(f"wallet config and/or settings not provided")
+            self.logger.warning(f"[WALLET_HTTP]: wallet config and/or settings not provided")
             return
 
         try:
             process = subprocess.Popen(arguments.split(' '), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
-            # if self.method == 'epicbox':
             if kwargs['callback']:
-                updater = threading.Thread(target=self.log_monitor, args=(process, kwargs['callback']))
-                updater.daemon = True
-                self.logger.debug(f">> Starting epicbox listener log monitor..")
+                updater = threading.Thread(target=self.log_monitor, args=(process, kwargs['callback']), daemon=True)
+                self.logger.debug(f"[WALLET_HTTP]: Starting listener log monitor..")
                 updater.start()
 
-            self.logger.info(f">> {self.method} listener started [PID: {process.pid} | PORT: {listen_port}]..")
+            address = f"| ADDRESS: {self.config.epicbox_address}" if self.method == 'epicbox' else ''
+            self.logger.info(f"[WALLET_HTTP]: {self.method} listener started [PID: {process.pid} | PORT: {listen_port} {address}]")
 
             self.process = psutil.Process(int(process.pid))
         except Exception as e:
             if 'Only one usage of each socket address' in str(e) or 'Address already in use' in str(e):
-                self.logger.warning(f">> other {self.method} listener already running?")
+                self.logger.warning(f"[WALLET_HTTP]: other {self.method} listener already running?")
             else:
-                self.logger.error(f"\n\n{str(e)}\n\n")
+                self.logger.error(f"[WALLET_HTTP]: {str(e)}")
 
         return self
 
@@ -368,9 +367,8 @@ class Listener:
             line = process.stdout.readline()
 
             if 'Broken pipe' in line:
-                cls.logger.error(line)
+                cls.logger.error(f"[WALLET_HTTP]: {line}")
             elif line:
-                # cls.logger.warning(line)
                 callback(' '.join(line.strip('\n').split(' ')[3:]))
 
     def stop(self):
@@ -378,10 +376,10 @@ class Listener:
             try:
                 self.process.kill()
             except Exception as e:
-                self.logger.warning(e)
+                self.logger.warning(f"[WALLET_HTTP]: {str(e)}")
 
             self.process = None
-            self.logger.info(f"'{self.method}' listener closed")
+            self.logger.info(f"'[WALLET_HTTP]: {self.method}' listener closed")
 
     def __repr__(self):
         if self.process is not None:

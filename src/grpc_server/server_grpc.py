@@ -3,13 +3,22 @@
 # plugin: grpclib.plugin.main
 import abc
 import typing
+import sys
+from pathlib import Path
 
 import grpclib.const
 import grpclib.client
 if typing.TYPE_CHECKING:
     import grpclib.server
 
-from . import server_pb2
+sys.path.append(str(Path('..').absolute().parent))
+sys.path.append(str(Path('.').absolute().parent.parent))
+sys.path.append(str(Path('.').absolute().parent.parent.parent))
+
+try:
+    import server_pb2
+except:
+    from . import server_pb2
 
 
 class WalletServerBase(abc.ABC):

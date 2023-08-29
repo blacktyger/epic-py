@@ -1,7 +1,9 @@
-import threading
 from pathlib import Path
+import threading
+import datetime
 import asyncio
 import json
+import pytz
 import sys
 
 from grpclib.server import Server, Stream
@@ -54,6 +56,14 @@ class WalletServer(WalletServerBase):
                     response = await self.create_outputs(request.data)
                     await stream.send_message(WalletResponse(result=response))
 
+                case 'transactions':
+                    response = await self.transactions(request.data)
+                    await stream.send_message(WalletResponse(result=response))
+
+                case 'cancel_tx':
+                    response = await self.cancel_tx(request.data)
+                    await stream.send_message(WalletResponse(result=response))
+
                 case 'send_epicbox':
                     response = await self.send_epicbox(request.data)
                     await stream.send_message(WalletResponse(result=response))
@@ -103,21 +113,26 @@ class WalletServer(WalletServerBase):
                 self.wallet = Wallet(path=kwargs['wallet_data_directory'], long_running=kwargs['long_running'])
 
             if 'open' in kwargs and kwargs['open']:
-                await self.wallet.api_http_server.open()
+                await self.wallet.api_http_server.open(callback=self.owner_api_callback)
 
             if 'epicbox' in kwargs and kwargs['epicbox']:
                 if 'tx_updater_api_url' in kwargs:
                     self.tx_updater_api_url = kwargs['tx_updater_api_url']
-                    utils.logger.info(f">> Using transaction updater API at {self.tx_updater_api_url}")
+                    utils.logger.info(f"[gRPC_SERVER]: Using transaction updater API at {self.tx_updater_api_url}")
 
                 await self.wallet.run_epicbox(callback=self.tx_updater_callback)
 
             if 'balance_updater_api_url' in kwargs and 'balance_updater_interval' in kwargs:
                 api_url = kwargs['balance_updater_api_url']
-                interval = kwargs['balance_updater_interval']
-                utils.logger.info(f">> Using balance updater API at {api_url}")
+                utils.logger.info(f"[gRPC_SERVER]: Using balance updater API at {api_url}")
+                args = (self.balance_updater(api_url=api_url, interval=kwargs['balance_updater_interval']),)
+                thread = threading.Thread(target=asyncio.run, args=args, daemon=True)
+                thread.start()
 
-                thread = threading.Thread(target=asyncio.run, args=(self.balance_updater(api_url=api_url, interval=interval), ), daemon=True)
+            if 'run_tx_cleaner' in kwargs and 'tx_updater_api_url' in kwargs and 'tx_cleaner_interval' in kwargs:
+                utils.logger.info(f"[gRPC_SERVER]: Running pending transactions cleaner")
+                args = (self.transaction_cleaner(api_url=self.tx_updater_api_url, interval=kwargs['tx_cleaner_interval']), )
+                thread = threading.Thread(target=asyncio.run, args=args, daemon=True)
                 thread.start()
 
             return json.dumps(utils.response(SUCCESS, 'wallet opened', kwargs))
@@ -139,12 +154,17 @@ class WalletServer(WalletServerBase):
             return json.dumps(utils.response(ERROR, str(e)))
 
     async def balance_updater(self, interval: int, api_url: str):
+        await asyncio.sleep(10)
+        counter = 0
+
         while True:
             try:
+                counter += 1
+                utils.logger.info(f"[gRPC_SERVER]: Fetching balance: {counter}")
                 data = json.loads(await self.balance())
                 requests.post(api_url, json={'data': data['result']})
             except Exception as e:
-                utils.logger.warning(f"failed to update the balance {str(e)}")
+                utils.logger.warning(f"[gRPC_SERVER]: failed to update the balance: {str(e)}")
 
             await asyncio.sleep(interval)
 
@@ -162,6 +182,55 @@ class WalletServer(WalletServerBase):
             kwargs = json.loads(data)
             outputs = await self.wallet.create_outputs(**kwargs)
             return json.dumps(outputs)
+
+        except Exception as e:
+            return json.dumps(utils.response(ERROR, str(e)))
+
+    async def transactions(self, data: str):
+        try:
+            kwargs = json.loads(data)
+            json_txs = list()
+            txs = await self.wallet.get_transactions(**kwargs)
+
+            for tx in txs['data']:
+                json_txs.append(tx.json())
+
+            txs['data'] = json_txs
+
+            return json.dumps(txs)
+
+        except Exception as e:
+            return json.dumps(utils.response(ERROR, str(e)))
+
+    async def transaction_cleaner(self, interval: int, api_url: str):
+        await asyncio.sleep(3)
+        kwargs = {'status': 'pending', 'tx_type': 'sent', 'refresh': False}
+        counter = 0
+
+        while True:
+            timezone = pytz.timezone('utc')
+            delta = timezone.localize(datetime.datetime.utcnow() - datetime.timedelta(days=1))
+
+            try:
+                counter += 1
+                utils.logger.info(f"[gRPC_SERVER]: Fetching pending transaction to clean: {counter}")
+                txs = await self.wallet.get_transactions(**kwargs)
+
+                for tx in txs['data']:
+                    if tx.creation_ts < delta:
+                        await self.wallet.cancel_transaction(tx_slate_id=tx.tx_slate_id)
+                        requests.post(api_url, json={'data': f'clear pending transaction due to expiry date [{tx.tx_slate_id}]'})
+
+            except Exception as e:
+                utils.logger.warning(f"[gRPC_SERVER]: failed to cancel transactions: {str(e)}")
+
+            await asyncio.sleep(interval)
+
+    async def cancel_tx(self, data: str):
+        try:
+            kwargs = json.loads(data)
+            cancel = await self.wallet.cancel_transaction(**kwargs)
+            return json.dumps(cancel)
 
         except Exception as e:
             return json.dumps(utils.response(ERROR, str(e)))
@@ -214,20 +283,31 @@ class WalletServer(WalletServerBase):
     def tx_updater_callback(self, line: str):
         tx_slate_id = utils.parse_uuid(line)
         if tx_slate_id and 'wallet_' not in line:
-            utils.logger.critical(line)
+            utils.logger.critical(f"[EPICBOX_API]: {line}")
 
             if self.tx_updater_api_url:
                 try:
                     requests.post(self.tx_updater_api_url, json={'data': line})
                 except Exception:
-                    utils.logger.warning(f"Failed to request tx_updater_api_url")
+                    utils.logger.warning(f"[gRPC_SERVER]: Failed to request tx_updater_api_url")
+
+    @staticmethod
+    def owner_api_callback(line: str):
+        ignore_lines = [
+            'Scanning', 'Indices start', 'log4rs is initialized', 'Using wallet configuration',
+            'This is Epic Wallet', 'Built with profile', 'Seed file path', 'Using wallet seed',
+            'HTTP Owner', 'Updating transactions', 'Output found', 'Updating outputs', 'Close ""',
+            'Listener for stopped', 'Change amount', 'Slate sent', 'Refreshing wallet', 'Starting UTXO',
+            ]
+        if not any(ignore in line for ignore in ignore_lines):
+            utils.logger.info(f"[OWNER_API  ]: {line}")
 
 async def main(*, host: str = '127.0.0.1', port: int = 50051) -> None:
     server = Server([WalletServer()])
 
     with graceful_exit([server]):
         await server.start(host, port)
-        utils.logger.info(f'Wallet gRPC server running on {host}:{port}')
+        utils.logger.info(f'[gRPC_SERVER]: server running on {host}:{port}')
         await server.wait_closed()
 
 
