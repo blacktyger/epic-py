@@ -1,10 +1,10 @@
+from _decimal import Decimal
 import subprocess
 import datetime
 import asyncio
 import signal
 import json
 import os
-from _decimal import Decimal
 
 import psutil
 

@@ -11,7 +11,7 @@ sys.path.append(str(Path('.').absolute().parent.parent))
 sys.path.append(str(Path('.').absolute().parent.parent.parent))
 
 from src import utils
-from server_pb2 import WalletRequest, WalletResponse
+from server_pb2 import WalletRequest
 from server_grpc import WalletServerStub
 
 

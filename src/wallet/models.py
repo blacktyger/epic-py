@@ -352,6 +352,7 @@ class Listener:
             self.logger.info(f"[WALLET_HTTP]: {self.method} listener started [PID: {process.pid} | PORT: {listen_port} {address}]")
 
             self.process = psutil.Process(int(process.pid))
+
         except Exception as e:
             if 'Only one usage of each socket address' in str(e) or 'Address already in use' in str(e):
                 self.logger.warning(f"[WALLET_HTTP]: other {self.method} listener already running?")
