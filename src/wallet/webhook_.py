@@ -1,6 +1,6 @@
 from flask import Flask, request, abort
 
-app = Flask(__name__)
+app = Flask('lol')
 
 
 @app.route('/', methods=['POST'])

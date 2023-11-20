@@ -8,7 +8,7 @@ import os
 
 import psutil
 
-from .http import HttpServer
+from .http_api import HttpServer
 from . import models
 from .. import utils
 
