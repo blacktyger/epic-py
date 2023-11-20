@@ -44,6 +44,10 @@ class WalletServer(WalletServerBase):
                     response = await self.open(request.data)
                     await stream.send_message(WalletResponse(result=response))
 
+                case 'close':
+                    response = await self.close(request.data)
+                    await stream.send_message(WalletResponse(result=response))
+
                 case 'balance':
                     response = await self.balance(request.data)
                     await stream.send_message(WalletResponse(result=response))
@@ -136,6 +140,15 @@ class WalletServer(WalletServerBase):
                 thread.start()
 
             return json.dumps(utils.response(SUCCESS, 'wallet opened', kwargs))
+
+        except Exception as e:
+            return json.dumps(utils.response(ERROR, str(e)))
+
+    async def close(self, data: str) -> str:
+        try:
+            kwargs = json.loads(data)
+            await self.wallet.api_http_server._close_wallet(**kwargs)
+            return json.dumps(utils.response(SUCCESS, f'{self.wallet} closed'))
 
         except Exception as e:
             return json.dumps(utils.response(ERROR, str(e)))

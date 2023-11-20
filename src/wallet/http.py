@@ -145,21 +145,13 @@ class HttpServer:
 
         return self
 
-    async def run_server(self, method: str, callback=None, logger=None):
+    async def run_server(self, method: str, callback=None, logger=None, close_after_tx: bool = False, force_run: bool = False):
         """Run listener process"""
-        listener = models.Listener(settings=self.settings, config=self.config, method=method, logger=logger)
-        self.listeners.append(await listener.run(force_run=False, callback=callback))
+        kwargs = dict(settings=self.settings, config=self.config, method=method, logger=logger, close_after_tx=close_after_tx)
+        listener = models.Listener(**kwargs)
+        self.listeners.append(await listener.run(force_run=force_run, callback=callback))
         await asyncio.sleep(0.7)
         return self.listeners[-1]
-
-    async def _close_wallet(self):
-        utils.logger.info(f"[WALLET_HTTP]: CLOSING THE WALLET")
-        self.is_open = False
-        await self.close()
-
-        for listener in self.listeners:
-            if listener.method != "epicbox":
-                listener.stop()
 
     async def open(self, callback=None):
         # Run owner_api server to handle wallet operations
@@ -175,6 +167,18 @@ class HttpServer:
             self._lock()
 
         return await self._open_wallet()
+
+    async def _close_wallet(self, close_epicbox: bool = False) -> None:
+        utils.logger.info(f"[WALLET_HTTP]: CLOSING THE WALLET")
+        self.is_open = False
+        await self.close()
+
+        for listener in self.listeners:
+            if close_epicbox:
+                listener.stop()
+            else:
+                if listener.method != "epicbox":
+                    listener.stop()
 
     async def get_fees(self, amount: float | int | str, **kwargs):
         utils.logger.info('[WALLET_HTTP]: calculate the fees (dry-run)')
@@ -379,7 +383,7 @@ class HttpServer:
             }
         return await self._secure_api_call('get_public_address', params)
 
-    async def change_password(self, old: str, new: str, name: str = None):
+    async def change_password(self, old: str, new: str, name: str = None) -> bool:
         params = {
             'name': name,
             'old': old,
@@ -389,7 +393,7 @@ class HttpServer:
 
         return True
 
-    async def close(self, name: str = None):
+    async def close(self, name: str = None) -> bool:
         params = {'name': name}
         await self._secure_api_call('close_wallet', params)
         return True

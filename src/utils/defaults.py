@@ -1,5 +1,5 @@
-import platform
 from pathlib import Path
+import platform
 
 
 if platform.system() == 'Windows':
@@ -17,8 +17,7 @@ wallet_secret = '.owner_api_secret'
 wallet_api_port = 3415
 wallet_owner_port = 3420
 
-PASSWORD_STORAGE_PATH = "Wallets/passwords"
-EPICBOX_NODE = 'epicbox.fastepic.eu'
+EPICBOX_NODE = 'epicbox.btlabs.tech'
 EPICBOX_PORT = 443
 PUBLIC_NODE = 'https://btlabs.tech/node'
 LOCAL_NODE = "http://127.0.0.1:3413"

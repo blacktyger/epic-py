@@ -11,3 +11,5 @@ epic_sdk.egg-info/
 /utils/test.py
 tests/
 /wallet/test.py
+test*
+*.db

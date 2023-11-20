@@ -191,3 +191,16 @@ def parse_secret(api_secret: str) -> str:
         return wallet_secret
     else:
         return api_secret
+
+def delete_lock_files(directory: str = None, filename: str = None):
+    if directory is None:
+        directory = './wallets'
+
+    if filename is None:
+        filename = '.lock'
+
+    for root, dirs, files in os.walk(directory):
+        if filename in files:
+            file_path = os.path.join(root, filename)
+            os.remove(file_path)
+            print(f"Deleted file: {file_path}")

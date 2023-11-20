@@ -31,10 +31,19 @@ class Wallet:
 
         self.logger = logger
         self.updating = False
-        self.long_running = long_running
+        self._long_running = long_running
 
         if path:
             self.load_from_path(path)
+
+    @property
+    def long_running(self):
+        return self._long_running
+
+    @long_running.setter
+    def long_running(self, value):
+        self._long_running = value
+        self.api_http_server.long_running = value
 
     async def create_new(self, **kwargs):
         # Make sure all the required arguments are provided
@@ -60,7 +69,13 @@ class Wallet:
         try:
             os.makedirs(self.config.wallet_data_directory)
         except FileExistsError:
-            return {'error': 1, 'msg': "Wallet already exists", 'data': None}
+            try:
+                data = self.load_from_path(self.config.wallet_data_directory)
+            except Exception as e:
+                self.logger.warning(f"Can't load wallet from path {self.config.wallet_data_directory}: {str(e)}")
+                data = None
+
+            return {'error': 1, 'msg': "Wallet already exists", 'data': data}
 
         # Create directory to store transaction files
         self.config.tx_files_directory = os.path.join(self.config.wallet_data_directory, 'tx_files')
@@ -150,23 +165,25 @@ class Wallet:
         value = Decimal(value)
         return value / self.DECIMALS
 
-    async def run_epicbox(self, callback=None, force_run: bool = False, ignore_duplicate_name: bool = False, logger=None) -> models.Listener | None:
-        if not ignore_duplicate_name:
-            already_running = utils.find_process_by_name('method epicbox')
+    async def run_epicbox(self, callback=None, force_run: bool = False, logger=None,
+                          close_after_tx: bool = False) -> models.Listener | None:
+        running_listener: models.Listener | None = None
 
-            if already_running:
-                self.logger.critical(f"Epicbox listener already running, PID: {already_running}")
+        for listener in self.api_http_server.listeners:
+            if listener.method == 'epicbox' and listener.process:
+                running_listener = listener
 
-                if force_run:
-                    os.kill(already_running[0], signal.SIGKILL)
-                    self.logger.debug(f"Epicbox listener process closed")
-                else:
-                    return models.Listener(config=self.config, settings=self.settings,
-                                           process=psutil.Process(already_running[0]), method='epicbox')
+        if running_listener:
+            self.logger.critical(f"Epicbox listener already running, PID: {running_listener.process.pid}")
 
-        await self.api_http_server.run_server(method="epicbox", callback=callback, logger=logger)
+            if force_run:
+                running_listener.stop()
+                self.logger.debug(f"Epicbox listener process closed")
+            else:
+                return running_listener
 
-        return self.api_http_server.listeners[-1]
+        kwargs = dict(method="epicbox", callback=callback, logger=logger, close_after_tx=close_after_tx)
+        return await self.api_http_server.run_server(**kwargs)
 
     def get_version(self) -> str:
         """Get epic-wallet cli version"""
@@ -407,5 +424,29 @@ class Wallet:
             provider.post_tx(tx=finalize_slate['tx'])
             return True
 
+    def epicbox_logger(self, line: str):
+        tx_slate_id = utils.parse_uuid(line)
+        if tx_slate_id and 'wallet_' not in line:
+            utils.logger.critical(f"[EPICBOX_LOG] [{self.config.name}]: {line}")
+
+            if 'Starting to send slate' in line:
+                for listener in self.api_http_server.listeners:
+                    if listener.method == 'epicbox' and listener.close_after_tx:
+                        asyncio.run(asyncio.sleep(2))
+                        listener.stop()
+
+    async def close_wallet(self, close_epicbox: bool = False) -> None:
+        async with self.api_http_server as provider:
+            await provider._close_wallet(close_epicbox)
+
+    async def stop_listeners(self) -> None:
+        for listener in self.api_http_server.listeners:
+            listener.stop()
+
+        self.api_http_server._unlock()
+
     def __str__(self):
-        return f"EpicWallet(wallet_dir='{self.config.name}')"
+        return f"EpicWallet({self.config.name})"
+
+    def __repr__(self):
+        return f"EpicWallet({self.config.name})"

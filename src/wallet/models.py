@@ -277,7 +277,8 @@ class Config(BaseModel):
 class Listener:
     logger = utils.logger
 
-    def __init__(self, settings: Settings, config: Config, method: str, logger=None, process=None):
+    def __init__(self, settings: Settings, config: Config, method: str,
+                 close_after_tx: bool = False, logger=None, process=None):
         if logger is None:
             logger = utils.logger
         self.logger = logger
@@ -285,6 +286,7 @@ class Listener:
         self.settings = settings
         self.process: psutil.Process = process
         self.method: str = method
+        self.close_after_tx = close_after_tx
 
     async def run(self, **kwargs):
         flags = None
